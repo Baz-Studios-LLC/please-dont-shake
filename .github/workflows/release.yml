@@ -1,0 +1,115 @@
+name: release
+
+# Builds native artifacts per platform and attaches them to the GitHub Release:
+#   Windows -> zipped .exe + assets
+#   macOS   -> PleaseDontShake.app, both as a tarball (for the Baz Studios
+#              launcher) and in a drag-to-Applications .dmg (for people)
+#   Linux   -> zipped binary + assets
+# Cross-compiling Bevy isn't practical, so each platform builds on its own runner.
+#
+# This game loads its assets from disk at runtime rather than baking them into the
+# binary, so every package here carries `assets/` *beside the executable* — see
+# `asset_root()` in src/main.rs. Ship the binary alone and it launches into a tank
+# with no sand, no music and no theme. Divus Factus has the same property; the
+# macOS half is deliberately the same shape as its packaging script.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach assets to (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos-arm64
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps (Bevy needs ALSA + udev)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Build
+        run: cargo build --release
+
+      - name: Compute version (tag without leading v)
+        id: ver
+        shell: bash
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # NOTE: native asset names are VERSION-LESS on purpose — the launcher matches a
+      # fixed asset suffix across releases (`*-windows-x86_64.zip` /
+      # `*-macos-aarch64.app.tar.gz`). The release TAG carries the version. Don't
+      # reintroduce ${TAG} into these names or the launcher can't find the newest
+      # build. (The human-facing .dmg stays versioned.)
+      - name: Package — macOS .app
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          bash packaging/macos-app.sh target/release/please_dont_shake "${{ steps.ver.outputs.version }}" build
+          mkdir -p dist
+          tar -czf "dist/please-dont-shake-macos-aarch64.app.tar.gz" -C build PleaseDontShake.app
+          # And a disk image for people who'd rather drag it to Applications.
+          # Freed first: hdiutil needs scratch space and the build is done with it.
+          rm -rf target ~/.cargo/registry ~/.cargo/git
+          mkdir dmgroot
+          cp -R build/PleaseDontShake.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "Please Don't Shake" -srcfolder dmgroot -ov -format UDZO \
+            "dist/please-dont-shake-${TAG}-macos-arm64.dmg"
+
+      - name: Package — Windows .zip (binary + assets)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist, stage | Out-Null
+          Copy-Item target\release\please_dont_shake.exe stage\PleaseDontShake.exe
+          Copy-Item -Recurse assets stage\assets
+          Compress-Archive -Path stage\* -DestinationPath dist\please-dont-shake-windows-x86_64.zip -Force
+
+      - name: Package — Linux .zip (binary + assets)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p dist stage
+          cp target/release/please_dont_shake stage/please-dont-shake
+          cp -R assets stage/assets
+          (cd stage && zip -qr "../dist/please-dont-shake-linux-x86_64.zip" .)
+
+      # Release notes = the top (latest) section of CHANGELOG.md. The launcher shows
+      # the release body as patch notes and may fetch it the moment it exists, so the
+      # notes have to be in the release from birth — hence body_path rather than
+      # editing the release afterwards.
+      - name: Build release notes from CHANGELOG
+        shell: bash
+        run: |
+          awk '/^## /{n++} n==1' CHANGELOG.md | sed '1d' > RELEASE_NOTES.md
+          [ -s RELEASE_NOTES.md ] || echo "See CHANGELOG.md for details." > RELEASE_NOTES.md
+          echo "----- release notes -----"; cat RELEASE_NOTES.md
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          body_path: RELEASE_NOTES.md
+          files: dist/*
+          fail_on_unmatched_files: true
