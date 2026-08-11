@@ -3938,11 +3938,12 @@ dependencies = [
 [[package]]
 name = "ordo"
 version = "0.1.0"
-source = "git+https://github.com/Baz-Studios-LLC/Ordo?rev=48d8bfead12ff5e145befaa48ef43a2c47c68b29#48d8bfead12ff5e145befaa48ef43a2c47c68b29"
+source = "git+https://github.com/Baz-Studios-LLC/Ordo?rev=defd67cf959f762dc8e3e903e81fec5e6e077ff7#defd67cf959f762dc8e3e903e81fec5e6e077ff7"
 dependencies = [
  "bevy",
  "serde",
  "toml",
+ "wgpu-types",
 ]
 
 [[package]]

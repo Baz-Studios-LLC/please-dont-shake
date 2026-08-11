@@ -342,6 +342,15 @@ impl SandPalette {
 /// Stratum boundaries get a couple of superimposed sine waves so the layers aren't
 /// suspiciously flat — the same trick geology uses.
 pub fn fill_strata(grid: &mut SandGrid, fill_h: usize) {
+    // Empty the tank first. This only ever wrote *below* the fill line, which is fine for
+    // a fresh grid and wrong for a reset: spoil mounds, poured sand and anything else
+    // above the line survived, so going back to the title screen left the previous farm's
+    // heaps sitting on top of brand new strata.
+    for y in 0..GRID_H {
+        for x in 0..GRID_W {
+            grid.set_raw(x, y, Cell::AIR);
+        }
+    }
 
     for x in 0..GRID_W {
         let fx = x as f32;

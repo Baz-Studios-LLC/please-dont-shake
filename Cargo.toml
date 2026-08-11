@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy = "0.19"
-ordo = { git = "https://github.com/Baz-Studios-LLC/Ordo", rev = "48d8bfead12ff5e145befaa48ef43a2c47c68b29", version = "0.1.0" }
+ordo = { git = "https://github.com/Baz-Studios-LLC/Ordo", rev = "defd67cf959f762dc8e3e903e81fec5e6e077ff7", version = "0.1.0" }
 
 # Bevy's recommended dev profile: our own code builds fast, dependencies build fast-running.
 [profile.dev]
