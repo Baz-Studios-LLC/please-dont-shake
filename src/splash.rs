@@ -57,6 +57,23 @@ const STUDIO_FONT: &str = "fonts/FiraMono-Medium.ttf";
 /// on a 1280-wide window a 13px line was a grey smudge at the bottom of the screen.
 const STUDIO_LINE_SIZE: f32 = 26.0;
 
+/// How far above the baseline Fira draws the `©`, as a fraction of the em.
+///
+/// The sign is a *superior* mark in this face: its outline runs from 112 to 751 units up,
+/// where the digits run 0 to 704. That's deliberate — it's how `©` and `®` are
+/// conventionally set beside a wordmark, and SF Mono does the same — but in a line of
+/// running text it reads as a glyph floating above its neighbours.
+///
+/// Bevy's UI text has no baseline shift, so the sign is set as its own node and nudged
+/// down by exactly this much, which drops it onto the baseline at full size. Measured from
+/// the font's `glyf` table; recompute it if the face ever changes.
+const MARK_RAISE_EM: f32 = 0.112;
+
+/// Fira Mono's advance width, in ems. It's monospaced, so this is every glyph's — which
+/// makes it the width of the space that would have sat between the sign and the year if
+/// they were still one string.
+const MONO_ADVANCE_EM: f32 = 0.6;
+
 /// Everything spawned for the splash, so leaving it is one despawn.
 #[derive(Component)]
 pub struct SplashScreen;
@@ -78,6 +95,16 @@ pub struct SplashClock {
     /// afternoon.
     real: f32,
     frames: u32,
+}
+
+/// The studio line's typeface, at the line's size. Both halves of the line have to agree
+/// on this or bottom-aligning them stops aligning their baselines.
+fn studio_face(assets: &AssetServer) -> TextFont {
+    TextFont {
+        font: FontSource::Handle(assets.load(STUDIO_FONT)),
+        font_size: FontSize::Px(STUDIO_LINE_SIZE),
+        ..default()
+    }
 }
 
 pub fn enter_splash(
@@ -124,22 +151,41 @@ pub fn enter_splash(
                     ..default()
                 },
             ),
+            // The sign is a separate node from the words purely so it can be positioned by
+            // hand. Bottom-aligned rather than centred: both nodes are the same face at the
+            // same size, so their line boxes match and aligning the bottoms aligns the
+            // baselines. Then the sign alone gets nudged down onto that baseline.
             (
-                SplashMark,
-                Text::new(format!(
-                    "\u{00a9} {STUDIO_YEAR} Baz Studios, LLC. All rights reserved."
-                )),
-                TextFont {
-                    font: FontSource::Handle(assets.load(STUDIO_FONT)),
-                    font_size: FontSize::Px(STUDIO_LINE_SIZE),
-                    ..default()
-                },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
                 Node {
                     position_type: PositionType::Absolute,
                     bottom: px(34),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::End,
+                    column_gap: px(STUDIO_LINE_SIZE * MONO_ADVANCE_EM),
                     ..default()
                 },
+                children![
+                    (
+                        SplashMark,
+                        Text::new("\u{00a9}"),
+                        studio_face(&assets),
+                        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                        // Visual only — `UiTransform` doesn't disturb the layout, so the
+                        // gap either side of the sign stays exactly one character wide.
+                        UiTransform {
+                            translation: Val2::px(0.0, STUDIO_LINE_SIZE * MARK_RAISE_EM),
+                            ..default()
+                        },
+                    ),
+                    (
+                        SplashMark,
+                        Text::new(format!(
+                            "{STUDIO_YEAR} Baz Studios, LLC. All rights reserved."
+                        )),
+                        studio_face(&assets),
+                        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                    ),
+                ],
             ),
         ],
     ));
