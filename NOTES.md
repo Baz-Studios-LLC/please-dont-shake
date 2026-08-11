@@ -225,6 +225,23 @@ was, not that anything hatched. Every scripted run overrides this — see
 `CAPTURE_DAYS_PER_SECOND` — and that override is the only reason a two-minute test can say
 anything at all about brood.
 
+### Testing it: `[` and `]`
+
+Six real days a brood cycle is untestable by eye, so the colony's calendar has a speed control —
+`devcapture::SPEEDS`, four named rates from real time to a colony day a second. `[` slower, `]`
+faster, announced in the terminal; `--speed <multiplier>` starts fast (1 is real time, 86400 is a
+day a second). Every run starts at real time and nothing remembers the speed, because a testing
+tool that *could* be left switched on eventually is.
+
+**Only biology moves.** Not a limitation to be fixed later: a brood cycle in a minute is 8,640×
+real time, and the sand is a 60 Hz automaton over a quarter of a million cells — 8,640× would be
+half a million sweeps a second. The sand and the ants are always real; what compresses is the
+calendar. If you need faster *sand*, that is `Time::<Virtual>::relative_speed` and it tops out
+somewhere single-digit.
+
+The fastest rate in the table is the one the capture harness has always used, so every scripted
+run is a hundred and twenty-five days of evidence for it.
+
 **Do not "fix" this by shortening the stage constants in `src/brood.rs`.** That advice used to
 be here and it was wrong: DESIGN.md now says plainly that the real-time clock is what makes this
 *Mountain* with ants in it rather than a game you sit in front of, and compressing biology to

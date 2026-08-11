@@ -438,6 +438,166 @@ pub fn screenshot_hotkey(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Colony speed
+// ---------------------------------------------------------------------------
+
+/// Colony speeds, slowest first, with the words each one is announced in.
+///
+/// Real time is index zero and every run starts there, flag aside — a testing tool that could
+/// be left switched on would eventually be left switched on, and the difference between this
+/// game and a game is that its clock is honest.
+///
+/// Only *biology* moves: brood, ageing, laying. It cannot be otherwise, and this is worth
+/// understanding before wishing for a single knob that speeds everything up. Watching a brood
+/// cycle in a minute needs 8,640× real time, and the sand is a cellular automaton over a
+/// quarter of a million cells at 60 Hz — 8,640× would be half a million sweeps a second. The
+/// sand and the ants stay real; what gets compressed is the calendar.
+///
+/// The top of the table is what every scripted run has always used: a colony day a second, or
+/// a hundred and twenty-five days in a two-minute capture.
+pub const SPEEDS: [(f64, &str); 4] = [
+    (1.0 / 86_400.0, "real time — a colony day takes a day"),
+    (1.0 / 3_600.0, "a colony day an hour"),
+    (1.0 / 60.0, "a colony day a minute"),
+    (1.0, "a colony day a second"),
+];
+
+/// Where in [`SPEEDS`] the game is running. Deliberately not saved: see the table.
+#[derive(Resource, Default)]
+pub struct ColonySpeed(pub usize);
+
+/// Step to the next speed up or down. Stops at both ends rather than wrapping, so `[` held
+/// down always arrives at real time.
+fn stepped(from: usize, faster: bool) -> usize {
+    if faster { (from + 1).min(SPEEDS.len() - 1) } else { from.saturating_sub(1) }
+}
+
+/// `--speed <multiplier>`, where 1 is real time and 86400 is a colony day a second.
+///
+/// A multiplier rather than an index, because "a thousand times faster" is a thing you can
+/// think, and `--speed 0.0000115` is not. Anything unparseable is ignored rather than fatal:
+/// a mistyped flag on a test run should not be the reason the farm didn't open.
+pub fn speed_flag() -> Option<f64> {
+    std::env::args()
+        .skip_while(|a| a != "--speed")
+        .nth(1)?
+        .parse::<f64>()
+        .ok()
+        .filter(|m| *m > 0.0)
+}
+
+/// Put the flag into effect, and leave the keys stepping from the nearest named speed.
+pub fn apply_speed_flag(mut speed: ResMut<ColonySpeed>, mut clock: ResMut<crate::ants::ColonyClock>) {
+    let Some(multiplier) = speed_flag() else {
+        return;
+    };
+    let rate = multiplier / 86_400.0;
+    clock.days_per_second = rate;
+    speed.0 = SPEEDS
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| (a.0 - rate).abs().total_cmp(&(b.0 - rate).abs()))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    info!("colony speed: {multiplier}x real time");
+}
+
+/// `[` slower, `]` faster.
+///
+/// Ships in the release build, like F12 does, because release is the only build this game can
+/// be tested in — a debug build of the sand automaton doesn't hold frame rate, so a
+/// `debug_assertions` gate would put the tool where it can't be used. Undocumented in game,
+/// announced in the terminal, and never remembered between runs.
+pub fn speed_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut speed: ResMut<ColonySpeed>,
+    mut clock: ResMut<crate::ants::ColonyClock>,
+) {
+    let faster = keys.just_pressed(KeyCode::BracketRight);
+    let slower = keys.just_pressed(KeyCode::BracketLeft);
+    if faster == slower {
+        return;
+    }
+
+    let at = stepped(speed.0, faster);
+    if at == speed.0 {
+        return;
+    }
+    speed.0 = at;
+    let (rate, name) = SPEEDS[at];
+    clock.days_per_second = rate;
+    info!("colony speed: {name}");
+}
+
+#[cfg(test)]
+mod speed_tests {
+    use super::*;
+
+    /// Real time is the floor and the game starts there, the table only ever gets faster, and
+    /// the top of it is the rate every capture run uses. All three are load-bearing: the first
+    /// because a testing tool must not be capable of being left on, the second because `[` has
+    /// to be "slower" at every step, and the third because it is the only rate with a hundred
+    /// and twenty-five days of evidence behind it.
+    #[test]
+    fn the_table_starts_at_real_time_and_only_climbs() {
+        assert_eq!(ColonySpeed::default().0, 0, "a run must start at real time");
+        assert_eq!(SPEEDS[0].0, 1.0 / 86_400.0, "index zero is not real time");
+        assert_eq!(CAPTURE_DAYS_PER_SECOND, SPEEDS[SPEEDS.len() - 1].0);
+
+        for pair in SPEEDS.windows(2) {
+            assert!(pair[1].0 > pair[0].0, "the table is not sorted slowest first");
+        }
+    }
+
+    /// Stepping stops at both ends. Wrapping would mean `]` at the top slams the colony back to
+    /// real time, which reads as the key having done nothing at all.
+    #[test]
+    fn stepping_stops_at_both_ends() {
+        let top = SPEEDS.len() - 1;
+        assert_eq!(stepped(0, false), 0, "slower than real time");
+        assert_eq!(stepped(0, true), 1);
+        assert_eq!(stepped(top, true), top, "faster than the fastest");
+        assert_eq!(stepped(top, false), top - 1);
+    }
+
+    /// The keys themselves, through the real system.
+    ///
+    /// `stepped` being right is not the same as the keys being wired to it: a mistyped `KeyCode`
+    /// or a `pressed` where `just_pressed` belongs both look exactly like working code, and
+    /// neither can be caught by pressing a key once and seeing the log line appear.
+    #[test]
+    fn the_keys_move_the_colony_clock() {
+        let press = |key: KeyCode| {
+            let mut app = App::new();
+            let mut keys = ButtonInput::<KeyCode>::default();
+            keys.press(key);
+            app.insert_resource(keys)
+                .init_resource::<ColonySpeed>()
+                .init_resource::<crate::ants::ColonyClock>()
+                .add_systems(Update, speed_keys);
+            app.update();
+            let world = app.world();
+            (world.resource::<ColonySpeed>().0, world.resource::<crate::ants::ColonyClock>().days_per_second)
+        };
+
+        assert_eq!(press(KeyCode::BracketRight), (1, SPEEDS[1].0), "] did not speed the colony up");
+        assert_eq!(press(KeyCode::BracketLeft), (0, SPEEDS[0].0), "[ moved below real time");
+        assert_eq!(press(KeyCode::KeyP), (0, SPEEDS[0].0), "an unrelated key changed the clock");
+    }
+
+    /// The named speeds have to *be* what they are named. A colony day an hour is 24 days a day,
+    /// and this is the check that a typed zero in the table can't quietly become a fortnight.
+    #[test]
+    fn each_speed_is_the_span_it_claims() {
+        let days_in = |rate: f64, seconds: f64| rate * seconds;
+        assert!((days_in(SPEEDS[0].0, 86_400.0) - 1.0).abs() < 1e-12, "a day a day");
+        assert!((days_in(SPEEDS[1].0, 3_600.0) - 1.0).abs() < 1e-12, "a day an hour");
+        assert!((days_in(SPEEDS[2].0, 60.0) - 1.0).abs() < 1e-12, "a day a minute");
+        assert!((days_in(SPEEDS[3].0, 1.0) - 1.0).abs() < 1e-12, "a day a second");
+    }
+}
+
 /// Timeline, in seconds. The point is the *gradient*: leave it alone, tap it, shake it
 /// gently, then shake it properly, and check each step does proportionally more damage.
 const T_DIG: f32 = 0.6;
@@ -575,7 +735,10 @@ const C_QUIT: f32 = 125.0;
 /// thousandth of a day and nothing about the brood is observable at all. At one day a second
 /// the same run covers a hundred and twenty-five days — twenty brood cycles — which is the
 /// only way a two-minute test can say anything about a six-day life stage.
-const CAPTURE_DAYS_PER_SECOND: f64 = 1.0;
+///
+/// The top of [`SPEEDS`], so the fastest thing the speed keys can do is the thing every capture
+/// run has always done. One rate, exercised end to end on every run.
+const CAPTURE_DAYS_PER_SECOND: f64 = SPEEDS[SPEEDS.len() - 1].0;
 
 pub fn run_colony_capture(
     mut commands: Commands,

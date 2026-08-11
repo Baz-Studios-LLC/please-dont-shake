@@ -252,7 +252,16 @@ fn main() {
                 .chain()
                 .run_if(in_state(GameState::Playing)),
         )
-        .add_systems(Update, devcapture::screenshot_hotkey);
+        .add_systems(Update, devcapture::screenshot_hotkey)
+        // The colony's calendar, for testing. Real time unless `--speed` says otherwise, and
+        // `[` / `]` step it while the farm runs — see `devcapture::SPEEDS` for why only biology
+        // can be sped up and why this is never remembered between runs.
+        .init_resource::<devcapture::ColonySpeed>()
+        // Before the tank, and so before `load_farm` — which is `.after(setup_tank)` and reads
+        // the clock's rate to turn "how long the app was shut" into colony-days. A flag applied
+        // afterwards would convert that gap at real time and then run the farm fast.
+        .add_systems(Startup, devcapture::apply_speed_flag.before(setup_tank))
+        .add_systems(Update, devcapture::speed_keys);
 
     // Persistence, and deliberately not in capture mode.
     //
