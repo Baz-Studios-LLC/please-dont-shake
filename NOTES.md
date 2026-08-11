@@ -225,8 +225,13 @@ was, not that anything hatched. Every scripted run overrides this — see
 `CAPTURE_DAYS_PER_SECOND` — and that override is the only reason a two-minute test can say
 anything at all about brood.
 
-If the farm ever feels dead rather than slow, the honest levers are the three stage constants
-in `src/brood.rs`, not the clock.
+**Do not "fix" this by shortening the stage constants in `src/brood.rs`.** That advice used to
+be here and it was wrong: DESIGN.md now says plainly that the real-time clock is what makes this
+*Mountain* with ants in it rather than a game you sit in front of, and compressing biology to
+fit a session is exactly the move that breaks it. A farm that feels slow in a sitting is the
+farm working. If it feels *dead*, the answer is that a glance has to be worth taking — the tank
+always looking like something, and the away catch-up making a return worth it — not a faster
+clock.
 
 ### And the farm lives while the app is shut
 
