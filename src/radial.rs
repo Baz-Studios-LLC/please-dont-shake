@@ -164,7 +164,7 @@ pub fn sync_radial_ui(
                 // The count rides in the label, so you can see what's left without
                 // a separate inventory panel to read.
                 let label = match stock.remaining(*item) {
-                    Some(n) => format!("{} {}", item.label(), n),
+                    Some(n) => format!("{} x{}", item.label(), n),
                     None => item.label().to_string(),
                 };
                 let mut spoke = commands.spawn((wedge(i, &label), ChildOf(hub)));
