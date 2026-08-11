@@ -195,6 +195,11 @@ fn main() {
     // StatesPlugin with it. Verification runs skip the splash and the menu and open
     // straight into a live colony; the title-screen shot starts at the splash like any
     // other run, and `enter_splash` sends it on to the menu immediately.
+    // Two separate questions. Every run that photographs UI has to keep the camera on the
+    // window (see the offscreen note below) — but only the two that photograph the shell
+    // want to *start* there. The wheel is chrome over a live farm, so it opens in play.
+    let ui_shot =
+        devcapture::title_shot() || devcapture::splash_shot() || devcapture::wheel_shot();
     let shell_shot = devcapture::title_shot() || devcapture::splash_shot();
     if devcapture::capture_mode() && !shell_shot {
         app.insert_state(GameState::Playing);
@@ -211,11 +216,13 @@ fn main() {
         // camera is on the window. So the two runs that exist to photograph UI have to
         // keep the camera where it is and grab the window instead. Set the target up for
         // them and the screenshot is a perfectly plausible sheet of black.
-        if !shell_shot {
+        if !ui_shot {
             app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
         }
 
-        if devcapture::splash_shot() {
+        if devcapture::wheel_shot() {
+            app.add_systems(Update, devcapture::run_wheel_shot);
+        } else if devcapture::splash_shot() {
             app.add_systems(Update, devcapture::run_splash_shot);
         } else if devcapture::title_shot() {
             app.add_systems(Update, devcapture::run_title_shot);

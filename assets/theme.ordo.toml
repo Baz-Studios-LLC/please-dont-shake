@@ -4,9 +4,9 @@
 # game is running — that's the point of it. A key Ordo doesn't know is a hard
 # error rather than a shrug.
 #
-# Everything here is drawn off the one object the game already has an opinion
-# about: the hand-lettered sticker on the glass. Warm paper, red marker, and the
-# golden-hour light coming through a kid's bedroom window behind the tank.
+# The palette is drawn from what's already on screen: warm paper, the tank's wood,
+# the sand's own strata, and the golden-hour light coming through a kid's bedroom
+# window behind the glass.
 
 [color]
 # Aged label paper, near opaque — a lit room bleeding through a panel is what
@@ -23,9 +23,19 @@ scrim         = { srgb = [0.055, 0.040, 0.030], alpha = 0.640 }
 ink           = { srgb = [0.925, 0.898, 0.845] }
 ink_dim       = { srgb = [0.520, 0.478, 0.430] }
 
-# The marker on the sticker. This is the game's one loud colour and it is only
-# ever used to mean "this is the thing".
-accent        = { srgb = [0.792, 0.118, 0.106] }
+# The game's one loud colour, only ever used to mean "this is the thing" — the
+# lit rim on the radial wheel, and the edge of a button under the pointer.
+#
+# It comes out of the sand. The old value was srgb [0.792, 0.118, 0.106]: hue 1
+# degree, 76% saturation, a printing-ink red with no relative anywhere in the
+# farm, which is why it read as harsh over a screen full of warm sand.
+#
+# This is the rust stratum's hue exactly (20 degrees), lifted from that stratum's
+# 41% saturation to 58%. The lift is not a fudge: at the stratum's own chroma the
+# brightest rust grain in the tank is srgb [0.694, 0.426, 0.291], so a highlight
+# drawn in it would disappear into the band it was sitting on. Same family as the
+# sand, still legible against it.
+accent        = { srgb = [0.711, 0.363, 0.189] }
 
 card_border   = { srgb = [0.330, 0.268, 0.212], alpha = 0.620 }
 panel_border  = { srgb = [0.392, 0.312, 0.240], alpha = 0.480 }

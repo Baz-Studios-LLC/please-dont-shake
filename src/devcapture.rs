@@ -78,6 +78,65 @@ pub fn splash_shot() -> bool {
     std::env::args().any(|a| a == "--splash-shot")
 }
 
+/// `--wheel-shot` opens the radial menu over the farm and photographs it.
+///
+/// The wheel is the one piece of chrome that has to be judged *against the sand* — it's
+/// translucent, it sits over the tank, and its lit rim is a colour question. The colony
+/// run drives the menu too, but only as a regression guard against the spawn panic: its
+/// frames go to the offscreen texture, where no UI exists at all.
+pub fn wheel_shot() -> bool {
+    std::env::args().any(|a| a == "--wheel-shot")
+}
+
+/// Where the wheel is opened, in window pixels, and which cell that stands for.
+const WHEEL_AT: Vec2 = Vec2::new(640.0, 430.0);
+const WHEEL_OPEN: f32 = 1.5;
+/// Two frames: nothing aimed at, then a wedge lit. The lit one is the colour test; the
+/// unlit one is what says the rim is the only thing that changed.
+const WHEEL_IDLE_SHOT: f32 = 2.2;
+const WHEEL_AIM: f32 = 2.6;
+const WHEEL_LIT_SHOT: f32 = 3.3;
+const WHEEL_QUIT: f32 = 4.0;
+
+pub fn run_wheel_shot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut menu: ResMut<crate::radial::RadialMenu>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+    let crossed = |at: f32| prev < at && cap.t >= at;
+    let mut shots: Vec<&str> = Vec::new();
+
+    if crossed(WHEEL_OPEN) {
+        menu.open = true;
+        menu.origin = WHEEL_AT;
+        menu.cell = Vec2::new(GRID_W as f32 * 0.5, INITIAL_SURFACE as f32 + 2.0);
+        menu.selected = None;
+    }
+    if crossed(WHEEL_IDLE_SHOT) {
+        shots.push("wheel-1-idle");
+    }
+    if crossed(WHEEL_AIM) {
+        menu.selected = Some(0);
+    }
+    if crossed(WHEEL_LIT_SHOT) {
+        shots.push("wheel-2-lit");
+    }
+
+    for name in shots {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(format!("{}/{name}.png", cap.out_dir)));
+    }
+
+    if crossed(WHEEL_QUIT) {
+        exit.write(AppExit::Success);
+    }
+}
+
 /// When the mark is grabbed, in seconds of splash time: mid fade-in, mid hold, mid
 /// fade-out. The fade is 1.3s either side of a 1.8s hold.
 const SPLASH_SHOTS: [(f32, &str); 3] = [
