@@ -117,7 +117,7 @@ pub enum Job {
 }
 
 impl Job {
-    fn for_age(age_days: f32) -> Job {
+    pub fn for_age(age_days: f32) -> Job {
         if age_days < NURSE_UNTIL {
             Job::Nurse
         } else if age_days < DIGGER_UNTIL {

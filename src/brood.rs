@@ -1,0 +1,403 @@
+//! The brood, and what the nurses are for.
+//!
+//! Two thirds of the colony had no job. Diggers dug, haulers hauled, and nurses correctly
+//! went to the queen and stood there — which without brood reads as ants milling in a hole.
+//! This is the other half of "behaviour is the storytelling": the colony grows, the youngest
+//! workers have work, and the ending becomes an ending *of* something.
+//!
+//! Brood are entities rather than a layer of the sand grid, because they are laid one at a
+//! time, carried individually, and sit in the air of a chamber rather than in the substrate.
+//! A grid layer fights all three.
+//!
+//! The nurse's whole behaviour is two rules:
+//!
+//! 1. If you are carrying brood and you are near the queen, put it down.
+//! 2. If you are not carrying brood and there is some lying away from the queen, pick it up.
+//!
+//! Nothing tells a nurse to build a pile. The pile is what those two rules add up to, because
+//! nurses already walk up the queen's pheromone — the movement code needed no changes at all.
+//! It is the first thing in this game that makes the nest look *inhabited* rather than
+//! excavated.
+//!
+//! See DESIGN.md for the one deliberate inaccuracy: the cycle is compressed to about six
+//! colony days, because an honest seven weeks does not fit inside a 40–60 hour lifespan.
+
+use bevy::prelude::*;
+
+use crate::ants::{Ant, AntAssets, ColonyClock, Job, Queen, body_bundle};
+use crate::grid::*;
+use crate::tank::TankRoot;
+
+/// Colony-days in each stage. Six days from laying to a walking worker.
+const EGG_DAYS: f32 = 2.0;
+const LARVA_DAYS: f32 = 2.5;
+const PUPA_DAYS: f32 = 1.5;
+
+/// Colony-days between eggs, and how much brood a queen will keep going at once.
+///
+/// The cap scales with the workforce because a real queen's laying rate does: a founding
+/// queen with ten workers cannot feed a hundred larvae, and a colony that tried would be
+/// modelling nothing.
+const LAY_INTERVAL: f32 = 0.35;
+const BASE_CLUTCH: usize = 4;
+const CLUTCH_PER_WORKER: f32 = 0.5;
+
+/// How close to the queen counts as "on the pile", and how far a nurse will reach for a
+/// stray. The reach is generous: a nurse that had to stand exactly on an egg would spend its
+/// life missing.
+const PILE_RADIUS: f32 = 4.0;
+const PICKUP_REACH: f32 = 3.0;
+
+/// Colony-days a worker lives.
+///
+/// Without a top end the age model is a ramp: eggs keep arriving, nobody leaves, and every
+/// ant eventually ages past `DIGGER_UNTIL` into surface work. Run at a day a second it took
+/// sixty seconds to reach a hundred ants of which none dug and eighty-five patrolled — a
+/// colony that had stopped building its own nest because everybody in it was old.
+///
+/// Real *Lasius* workers outlive this by a lot. It is scaled to the colony's own locked
+/// lifespan of 40–60 days instead, so a farm turns its workforce over several times before
+/// the queen's decline ends it, and the population is a curve rather than a climb.
+const WORKER_LIFESPAN: f32 = 35.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stage {
+    Egg,
+    Larva,
+    Pupa,
+}
+
+impl Stage {
+    fn lasts(self) -> f32 {
+        match self {
+            Stage::Egg => EGG_DAYS,
+            Stage::Larva => LARVA_DAYS,
+            Stage::Pupa => PUPA_DAYS,
+        }
+    }
+
+    /// What it turns into. `None` means it ecloses into a worker.
+    fn next(self) -> Option<Stage> {
+        match self {
+            Stage::Egg => Some(Stage::Larva),
+            Stage::Larva => Some(Stage::Pupa),
+            Stage::Pupa => None,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct Brood {
+    pub stage: Stage,
+    /// Colony-days spent in the *current* stage, not since laying.
+    pub age_days: f32,
+    /// Grid coordinates, like an ant's. Brood are an overlay on the sand too.
+    pub pos: Vec2,
+    /// The nurse carrying it, if any.
+    pub held_by: Option<Entity>,
+}
+
+/// Meshes and materials for the three stages, made once.
+#[derive(Resource)]
+pub struct BroodAssets {
+    mesh: Handle<Mesh>,
+    egg: Handle<StandardMaterial>,
+    larva: Handle<StandardMaterial>,
+    pupa: Handle<StandardMaterial>,
+}
+
+/// How long since the queen last laid, in colony-days.
+#[derive(Resource, Default)]
+pub struct LayClock(f32);
+
+/// What the harness reports. Population is the number that matters for brood the way mass is
+/// for sand: it should climb, and later it should fall.
+#[derive(Resource, Default)]
+pub struct BroodStats {
+    pub eggs: usize,
+    pub larvae: usize,
+    pub pupae: usize,
+    pub carried: usize,
+    pub laid: u64,
+    pub eclosed: u64,
+    pub died: u64,
+}
+
+pub fn setup_brood_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // One cube for all three, scaled per stage. At this size a shape would be a pixel of
+    // shape; the colour and the size are what read.
+    let mesh = meshes.add(Cuboid::new(CELL * 1.5, CELL * 1.1, CELL * 1.1));
+    let mut pale = |r: f32, g: f32, b: f32| {
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(r, g, b),
+            perceptual_roughness: 0.55,
+            reflectance: 0.10,
+            ..default()
+        })
+    };
+    commands.insert_resource(BroodAssets {
+        mesh,
+        // Eggs are tiny and almost white; larvae are bigger, fatter and creamier; pupae go
+        // browner as the adult cuticle forms under the skin, which is what actually happens.
+        egg: pale(0.95, 0.94, 0.88),
+        larva: pale(0.94, 0.90, 0.76),
+        pupa: pale(0.72, 0.60, 0.44),
+    });
+}
+
+/// The queen lays, if she has room for another.
+pub fn lay_eggs(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<ColonyClock>,
+    mut lay: ResMut<LayClock>,
+    mut stats: ResMut<BroodStats>,
+    assets: Option<Res<BroodAssets>>,
+    tank: Query<Entity, With<TankRoot>>,
+    queen: Query<&Ant, With<Queen>>,
+    workers: Query<(), (With<Ant>, Without<Queen>)>,
+    brood: Query<(), With<Brood>>,
+) {
+    let (Some(assets), Ok(queen), Ok(tank)) = (assets, queen.single(), tank.single()) else {
+        return;
+    };
+
+    lay.0 += time.delta_secs() * clock.days_per_second;
+    if lay.0 < LAY_INTERVAL {
+        return;
+    }
+    lay.0 = 0.0;
+
+    let clutch = BASE_CLUTCH + (workers.iter().count() as f32 * CLUTCH_PER_WORKER) as usize;
+    if brood.iter().count() >= clutch {
+        return;
+    }
+
+    // Laid where she stands. Nurses take it from there — and where she stands is already the
+    // deepest the colony has got, so the first eggs of a farm are on the pile by definition.
+    commands.spawn((
+        Brood { stage: Stage::Egg, age_days: 0.0, pos: queen.pos, held_by: None },
+        Mesh3d(assets.mesh.clone()),
+        MeshMaterial3d(assets.egg.clone()),
+        Transform::default(),
+        ChildOf(tank),
+    ));
+    stats.laid += 1;
+}
+
+/// Brood ages, changes stage, and eventually walks away.
+pub fn age_brood(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<ColonyClock>,
+    ants: Res<AntAssets>,
+    assets: Option<Res<BroodAssets>>,
+    mut stats: ResMut<BroodStats>,
+    tank: Query<Entity, With<TankRoot>>,
+    mut brood: Query<(Entity, &mut Brood, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    let (Some(assets), Ok(tank)) = (assets, tank.single()) else {
+        return;
+    };
+    let days = time.delta_secs() * clock.days_per_second;
+
+    for (entity, mut item, mut material) in &mut brood {
+        item.age_days += days;
+        if item.age_days < item.stage.lasts() {
+            continue;
+        }
+
+        match item.stage.next() {
+            Some(stage) => {
+                item.stage = stage;
+                item.age_days = 0.0;
+                material.0 = match stage {
+                    Stage::Egg => assets.egg.clone(),
+                    Stage::Larva => assets.larva.clone(),
+                    Stage::Pupa => assets.pupa.clone(),
+                };
+            }
+            None => {
+                // Eclosion. A worker at age zero, which `Job::for_age` picks up as a nurse
+                // with no changes — the labour split has been waiting for this since it was
+                // written.
+                let ant = Ant {
+                    pos: item.pos,
+                    heading: Vec2::X,
+                    vel: Vec2::ZERO,
+                    age_days: 0.0,
+                    carrying: None,
+                    dig_cooldown: 0.0,
+                    haul_time: 0.0,
+                    dug_at: Vec2::ZERO,
+                    dislodged: 0.0,
+                    z: SLAB_DEPTH * 0.5 - 0.03,
+                };
+                commands.spawn((body_bundle(&ants, ant, false), ChildOf(tank)));
+                commands.entity(entity).despawn();
+                stats.eclosed += 1;
+            }
+        }
+    }
+}
+
+/// Nurses gather the brood. Two rules; the pile is emergent.
+pub fn tend_brood(
+    mut stats: ResMut<BroodStats>,
+    queen: Query<&Ant, With<Queen>>,
+    nurses: Query<(Entity, &Ant), Without<Queen>>,
+    mut brood: Query<(Entity, &mut Brood)>,
+) {
+    let Ok(queen) = queen.single() else {
+        return;
+    };
+
+    stats.eggs = 0;
+    stats.larvae = 0;
+    stats.pupae = 0;
+    stats.carried = 0;
+
+    // Who is already carrying something, so nobody ends up with two.
+    let mut laden: Vec<Entity> = Vec::new();
+    for (_, item) in &brood {
+        if let Some(nurse) = item.held_by {
+            laden.push(nurse);
+        }
+    }
+
+    for (_, mut item) in &mut brood {
+        match item.stage {
+            Stage::Egg => stats.eggs += 1,
+            Stage::Larva => stats.larvae += 1,
+            Stage::Pupa => stats.pupae += 1,
+        }
+
+        match item.held_by {
+            Some(nurse) => {
+                let Ok((_, ant)) = nurses.get(nurse) else {
+                    // The nurse is gone. Put it down where it is rather than losing it.
+                    item.held_by = None;
+                    continue;
+                };
+                stats.carried += 1;
+                item.pos = ant.pos;
+                // Rule one: near the queen, this is the pile. Put it down.
+                if item.pos.distance(queen.pos) <= PILE_RADIUS {
+                    item.held_by = None;
+                }
+            }
+            None => {
+                // Rule two: anything lying away from the queen wants fetching. A nurse walks
+                // up her pheromone already, so carrying needs no steering of its own.
+                if item.pos.distance(queen.pos) <= PILE_RADIUS {
+                    continue;
+                }
+                let free_nurse = nurses.iter().find(|(entity, ant)| {
+                    Job::for_age(ant.age_days) == Job::Nurse
+                        && !laden.contains(entity)
+                        && ant.carrying.is_none()
+                        && ant.pos.distance(item.pos) <= PICKUP_REACH
+                });
+                if let Some((entity, _)) = free_nurse {
+                    item.held_by = Some(entity);
+                    laden.push(entity);
+                }
+            }
+        }
+    }
+}
+
+/// Workers die of old age.
+///
+/// Quietly and with no ceremony, which is the design's whole line on grimness: it is just
+/// what happens. The body is not left behind — a midden of corpses is a real behaviour and a
+/// real feature, and it belongs with foraging rather than here.
+///
+/// The queen is exempt. Her ending is the colony's, and it is M3's own piece of work.
+pub fn age_out(
+    mut commands: Commands,
+    mut stats: ResMut<BroodStats>,
+    workers: Query<(Entity, &Ant), Without<Queen>>,
+) {
+    for (entity, ant) in &workers {
+        if ant.age_days > WORKER_LIFESPAN {
+            commands.entity(entity).despawn();
+            stats.died += 1;
+        }
+    }
+}
+
+/// Brood doesn't walk, so nothing else keeps it out of the sand.
+///
+/// A collapse fills the chamber it was lying in, and an egg drawn inside a solid cell reads
+/// as a bug rather than as a burial. Lifting it to the nearest air above is the cheap honest
+/// answer: the pile gets pushed up by a cave-in instead of vanishing into it.
+pub fn unbury_brood(grid: Res<SandGrid>, mut brood: Query<&mut Brood>) {
+    for mut item in &mut brood {
+        if item.held_by.is_some() {
+            continue;
+        }
+        let (x, y) = (item.pos.x.floor() as isize, item.pos.y.floor() as isize);
+        if !SandGrid::in_bounds(x, y) || grid.is_air(x, y) {
+            continue;
+        }
+        for up in 1..8 {
+            if grid.is_air(x, y + up) {
+                item.pos.y = (y + up) as f32 + 0.5;
+                break;
+            }
+        }
+    }
+}
+
+pub fn sync_brood_transforms(mut brood: Query<(&Brood, &mut Transform)>) {
+    for (item, mut tf) in &mut brood {
+        let mut p = SandGrid::cell_to_world(0, 0);
+        p.x = (item.pos.x - GRID_W as f32 * 0.5) * CELL;
+        p.y = (item.pos.y - GRID_H as f32 * 0.5) * CELL;
+        // In front of the sand but behind the ants, so a nurse standing over the pile reads
+        // as standing over it.
+        p.z = SLAB_DEPTH * 0.5 - 0.06;
+        tf.translation = p;
+        // Larvae are fatter than eggs, and a pupa is nearly a worker.
+        tf.scale = Vec3::splat(match item.stage {
+            Stage::Egg => 0.7,
+            Stage::Larva => 1.0,
+            Stage::Pupa => 1.25,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cycle is six colony days, and every stage leads somewhere. Stated as a test
+    /// because the six is a design decision — see DESIGN.md — and a change to any one stage
+    /// should have to notice it is changing the whole.
+    #[test]
+    fn the_cycle_runs_egg_to_worker_in_six_days() {
+        assert_eq!(Stage::Egg.next(), Some(Stage::Larva));
+        assert_eq!(Stage::Larva.next(), Some(Stage::Pupa));
+        assert_eq!(Stage::Pupa.next(), None, "a pupa ecloses; it does not become brood");
+
+        let total = Stage::Egg.lasts() + Stage::Larva.lasts() + Stage::Pupa.lasts();
+        assert_eq!(total, 6.0, "the compressed cycle is six colony days");
+    }
+
+    /// A queen with more workers keeps more brood going. The floor matters as much as the
+    /// slope: a founding queen alone must still be able to lay.
+    #[test]
+    fn the_clutch_grows_with_the_workforce() {
+        let clutch = |workers: usize| {
+            BASE_CLUTCH + (workers as f32 * CLUTCH_PER_WORKER) as usize
+        };
+        assert_eq!(clutch(0), BASE_CLUTCH, "a queen alone must still lay");
+        assert!(clutch(10) > clutch(0));
+        assert!(clutch(100) > clutch(10));
+    }
+}

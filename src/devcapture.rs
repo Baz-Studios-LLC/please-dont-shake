@@ -563,6 +563,14 @@ const C_SHOT_SHAKE: f32 = 111.5;
 const C_SHOT_SETTLED: f32 = 124.0;
 const C_QUIT: f32 = 125.0;
 
+/// Colony-days per real second for the scripted runs.
+///
+/// The game runs at a colony day per real hour, so a two-minute capture covers three
+/// hundredths of a day and nothing about the brood is observable at all. At one day a second
+/// the same run covers a hundred and twenty-five days — twenty brood cycles — which is the
+/// only way a two-minute test can say anything about a six-day life stage.
+const CAPTURE_DAYS_PER_SECOND: f32 = 1.0;
+
 pub fn run_colony_capture(
     mut commands: Commands,
     time: Res<Time>,
@@ -574,6 +582,8 @@ pub fn run_colony_capture(
     grains: Query<(), With<crate::grains::Grain>>,
     ants: Query<&crate::ants::Ant>,
     stats: Res<crate::ants::ColonyStats>,
+    brood: Res<crate::brood::BroodStats>,
+    mut clock: ResMut<crate::ants::ColonyClock>,
     mut menu: ResMut<crate::radial::RadialMenu>,
     mut stock: ResMut<crate::radial::Stock>,
     mut placements: ResMut<crate::radial::PlacementQueue>,
@@ -594,6 +604,11 @@ pub fn run_colony_capture(
     // Nothing is in the tank until someone places it — so without this the whole colony
     // run measured an empty box, and said so: "0 ants". One kit, dropped on the surface,
     // exactly as the radial menu would place it.
+    // Once, at the top, before anything is stocked.
+    if prev == 0.0 {
+        clock.days_per_second = CAPTURE_DAYS_PER_SECOND;
+    }
+
     if crossed(C_STOCK) {
         let drop_at = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
         placements.0.push((crate::radial::StockItem::AntKit, drop_at));
@@ -614,7 +629,8 @@ pub fn run_colony_capture(
     for (mark, name) in C_SHOTS {
         if crossed(mark) {
             shoot_colony(
-                &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, target, name,
+                &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, &brood, target,
+                name,
             );
         }
     }
@@ -653,8 +669,8 @@ pub fn run_colony_capture(
             in_flight + carried,
             alive,
             carried,
-
             &stats,
+            &brood,
             target,
             "05-after-tap",
         );
@@ -685,8 +701,8 @@ pub fn run_colony_capture(
             in_flight + carried,
             alive,
             carried,
-
             &stats,
+            &brood,
             target,
             "06-mid-shake",
         );
@@ -699,8 +715,8 @@ pub fn run_colony_capture(
             in_flight + carried,
             alive,
             carried,
-
             &stats,
+            &brood,
             target,
             "07-settled",
         );
@@ -720,6 +736,7 @@ fn shoot_colony(
     alive: usize,
     carried: usize,
     stats: &crate::ants::ColonyStats,
+    brood: &crate::brood::BroodStats,
     target: &Handle<Image>,
     name: &str,
 ) {
@@ -745,6 +762,13 @@ fn shoot_colony(
     info!(
         "    stuck now {} | at the glass {} | jobs: {} nurses, {} diggers, {} surface",
         stats.walled_in, stats.at_the_glass, stats.nurses, stats.diggers, stats.surface
+    );
+    // Population is to the brood what mass is to the sand: the one number that says whether
+    // the thing is working. It should climb, and much later it should fall.
+    info!(
+        "    brood {} eggs, {} larvae, {} pupae ({} carried) | laid {} | eclosed {} | died {}",
+        brood.eggs, brood.larvae, brood.pupae, brood.carried, brood.laid, brood.eclosed,
+        brood.died
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",

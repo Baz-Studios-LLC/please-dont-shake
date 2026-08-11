@@ -20,6 +20,7 @@
 
 mod ants;
 mod audio;
+mod brood;
 mod devcapture;
 mod farm;
 mod grains;
@@ -127,6 +128,8 @@ fn main() {
         .init_resource::<pause::PauseMenu>()
         .init_resource::<ants::KitPour>()
         .init_resource::<farm::GameInProgress>()
+        .init_resource::<brood::LayClock>()
+        .init_resource::<brood::BroodStats>()
         .init_resource::<hand::Touch>()
         .init_resource::<settings::Settings>()
         .init_resource::<settings::SettingsWindow>()
@@ -135,6 +138,7 @@ fn main() {
             (
                 setup_grain_assets,
                 setup_ant_assets,
+                brood::setup_brood_assets,
                 setup_tank,
                 // After the tank, whose camera the overlay hangs off.
                 hand::setup_hand,
@@ -175,6 +179,14 @@ fn main() {
                 // ants, who dig; then the sand, which reacts to what they dug.
                 (rebuild_nav_field, diffuse_pheromones).run_if(every_fourth_tick),
                 update_ants,
+                // The colony's other half. After the ants, so a nurse that has just moved
+                // carries its brood to where it now is rather than to where it was; before
+                // the sand, so a collapse this tick is what `unbury_brood` answers.
+                brood::lay_eggs,
+                brood::tend_brood,
+                brood::age_brood,
+                brood::unbury_brood,
+                brood::age_out,
                 step_sand,
                 spawn_queued_grains,
                 update_grains,
@@ -200,6 +212,7 @@ fn main() {
                 ants::pour_kit,
                 radial::sync_radial_ui,
                 sync_ant_transforms,
+                brood::sync_brood_transforms,
                 remesh_dirty_chunks,
             )
                 .chain(),

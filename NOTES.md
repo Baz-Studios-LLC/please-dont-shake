@@ -190,15 +190,51 @@ git tag v0.1.1 && git push origin v0.1.1
 
 `v0.1.0` is out, with all three platform assets attached.
 
-## Next: brood
+## Next: the queen goes missing at speed
 
-The agreed next piece, designed in DESIGN.md under "Brood — what the nurses are for". Start
-there; it names the data model, what nurses do, and the one deliberate inaccuracy (the brood
-cycle is compressed to about six colony days, because the honest seven weeks does not fit
-inside a 40–60 hour lifespan).
+Brood works — see below — but the capture run at a colony day per second ends with the whole
+colony gone and the brood counters *frozen* at the same numbers for the last three reports:
 
-Two things already in place that it plugs into: `Job::for_age` needs no changes to pick up a
-newly eclosed worker, and the `Queen` pheromone already marks where "deep and safe" is.
+```
+04-nest-100s: jobs: 0 nurses, 0 diggers, 0 surface
+              brood 5 eggs, 8 larvae, 4 pupae | laid 73 | eclosed 73 | died 93
+```
+
+Frozen counters are the signature of `tend_brood` returning early, and the only thing it
+returns early for is `queen.single()` failing. So **the queen is being lost** somewhere after
+about sixty seconds of accelerated time, and with her go the laying and the tending. Nothing
+in the code despawns her — `age_out` excludes `Queen` — so the likely candidates are: two
+queens existing at once (`single()` fails on more than one, and a second `AntKit` would do
+it), or the queen entity being despawned by something that doesn't know what it has.
+
+Also suspect: `died 93` exceeds the 83 workers that ever existed (10 poured plus 73 eclosed).
+`FixedUpdate` can run several times per rendered frame and `Commands` are deferred, so the
+same ant is probably counted dead more than once before its despawn lands. Harmless to the
+sim, wrong in the report — fix the counter with a `Died` marker or by checking within the
+frame.
+
+Start here. It is a real bug in new code, and it was found by the harness rather than by eye,
+which is the system working.
+
+## Brood, as built
+
+Egg to larva to pupa to worker in six colony days, in `src/brood.rs`. Designed in DESIGN.md
+under "Brood — what the nurses are for", including why six.
+
+It works: measured 10 ants to 98, with 76 laid and 76 eclosed. Nurses gather stray brood to
+the queen from two rules and nothing tells them to make a pile.
+
+**The colony clock is why nothing appears to happen in a normal session.** At the locked day
+per real hour, one stage takes hours. The scripted runs set `days_per_second = 1.0`, which is
+the only way a two-minute test can say anything about a six-day life stage — see
+`CAPTURE_DAYS_PER_SECOND`.
+
+Workers now die at `WORKER_LIFESPAN`. Without it the age model was a ramp: at speed, sixty
+seconds produced a hundred ants of which none dug and eighty-five patrolled, because
+everybody was old. Population should be a curve.
+
+Not yet done: **brood is not saved**. Closing the app loses the pile, which is wrong and is a
+`#[serde(default)]` Vec away from being right in `src/save.rs`.
 
 ## Not yet done
 
