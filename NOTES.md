@@ -190,6 +190,16 @@ git tag v0.1.1 && git push origin v0.1.1
 
 `v0.1.0` is out, with all three platform assets attached.
 
+## Next: brood
+
+The agreed next piece, designed in DESIGN.md under "Brood — what the nurses are for". Start
+there; it names the data model, what nurses do, and the one deliberate inaccuracy (the brood
+cycle is compressed to about six colony days, because the honest seven weeks does not fit
+inside a 40–60 hour lifespan).
+
+Two things already in place that it plugs into: `Job::for_age` needs no changes to pick up a
+newly eclosed worker, and the `Queen` pheromone already marks where "deep and safe" is.
+
 ## Not yet done
 
 - Spoil-hauling rate (the open M2 task above) — 67% and worth pushing further.

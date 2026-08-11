@@ -228,6 +228,54 @@ Not scheduled for M1, but the grid is built to carry it.
 
 ---
 
+### Brood — what the nurses are for
+
+The colony digs and hauls, and a third of it has nothing to do. Nurses correctly go to the
+queen and stay with her, which without brood reads as ants milling in a hole. Brood is the
+missing half of "behaviour is the storytelling": it is what makes the colony **grow**, what
+gives two thirds of the workers a job, and what the ending is an ending *of*.
+
+**Brood are entities, not a substance.** They are carried, tended and moved individually,
+they sit in the air of a chamber rather than in the sand, and the queen makes them one at a
+time. A grid layer would fight all four of those.
+
+| stage | becomes | what a nurse does with it |
+|---|---|---|
+| **Egg** | larva | carries it to the deepest chamber it can reach; keeps the pile together |
+| **Larva** | pupa | feeds it — this is where food will matter, and where hunger will bite first |
+| **Pupa** | worker | nothing; it is left alone until it ecloses |
+
+The pile is the point. Nurses gathering brood into one heap in the deepest chamber is a
+*visible* behaviour nobody authored, and it is the first thing in the game that makes the
+nest look inhabited rather than excavated.
+
+#### The timescale problem, and the decision
+
+Real *Lasius niger* takes something like seven or eight weeks from egg to worker. At the
+locked clock of **1 real hour : 1 colony day** that is fifty-odd hours — and the locked
+lifespan is 40–60 hours. A real colony lives through hundreds of brood cycles; ours would
+live through *one*, and the player would watch a single cohort arrive shortly before the
+queen's decline.
+
+So the brood cycle compresses, and this is a deliberate departure from the accuracy the rest
+of the simulation holds to: **egg to worker in about six colony days**, so a farm left running
+overnight shows several cohorts and a population that visibly climbs and then falls. The
+alternative — keeping brood honest and stretching the lifespan to weeks of real time — is a
+different game, and not the one in the rest of this document.
+
+Recorded here rather than buried in a constant, because it is the one place the simulation
+knowingly lies, and anyone who finds the number later deserves to know it was a choice.
+
+#### What it takes
+
+- `Brood { stage, age_days, carried_by }` as a component; the queen lays on a timer.
+- Nurses gain two behaviours: fetch a loose egg, and settle it on the pile. The `Queen`
+  pheromone already marks where "deep and safe" is.
+- Eclosion spawns a worker at `age_days = 0`, which the existing `Job::for_age` picks up with
+  no changes — the labour split has been waiting for this.
+- Population over time becomes the number worth reporting from the harness, the way mass and
+  excavation are now.
+
 ## Milestones
 
 **M1 — The Toy** *(built)*
