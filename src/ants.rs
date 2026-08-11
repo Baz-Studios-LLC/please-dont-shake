@@ -475,7 +475,7 @@ fn nearest_free(grid: &SandGrid, at: Vec2) -> Option<Vec2> {
 // ---------------------------------------------------------------------------
 
 #[inline]
-fn cell_of(pos: Vec2) -> (isize, isize) {
+pub fn cell_of(pos: Vec2) -> (isize, isize) {
     (pos.x.floor() as isize, pos.y.floor() as isize)
 }
 

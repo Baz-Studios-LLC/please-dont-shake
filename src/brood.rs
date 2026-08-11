@@ -354,11 +354,28 @@ pub fn tend_brood(
 /// The queen is exempt. Her ending is the colony's, and it is M3's own piece of work.
 pub fn age_out(
     mut commands: Commands,
+    mut grid: ResMut<SandGrid>,
     mut stats: ResMut<BroodStats>,
     workers: Query<(Entity, &Ant), Without<Queen>>,
 ) {
     for (entity, ant) in &workers {
         if ant.age_days > WORKER_LIFESPAN {
+            // Whatever it was carrying goes back in the tank.
+            //
+            // Sand is conserved exactly in this game, and an ant that died holding a grain
+            // used to take it out of the world. It measured as mass drift and nothing else:
+            // 25344 grains down to 25330 over a hundred and twenty-five days and two hundred
+            // and twenty-nine deaths, with about a third of the colony hauling at any moment.
+            // The mass invariant is the one number the harness watches hardest, and this is
+            // the kind of leak it exists to catch — a tenth of a percent, invisible by eye,
+            // and permanent.
+            //
+            // `settle` is the same function the save file uses to put in-flight grains back:
+            // it searches upward for air, so it can never overwrite what is already there.
+            if let Some(shade) = ant.carrying {
+                let (cx, cy) = crate::ants::cell_of(ant.pos);
+                crate::grains::settle(&mut grid, cx, cy, shade);
+            }
             commands.entity(entity).despawn();
             stats.died += 1;
         }
@@ -432,6 +449,45 @@ mod tests {
 
         let total = Stage::Egg.lasts() + Stage::Larva.lasts() + Stage::Pupa.lasts();
         assert_eq!(total, 6.0, "the cycle is six colony days");
+    }
+
+    /// Sand is conserved exactly, and death is not an exception.
+    ///
+    /// A worker that dies with a grain in its mandibles used to delete it. Over a
+    /// hundred-and-twenty-five-day run that was fourteen grains gone for good, which is
+    /// exactly the kind of slow leak the mass check exists to catch.
+    #[test]
+    fn a_worker_that_dies_hauling_puts_the_grain_back() {
+        let mut grid = SandGrid::new();
+        fill_strata(&mut grid, INITIAL_SURFACE);
+        let before = grid.sand_count();
+
+        let mut app = App::new();
+        app.insert_resource(grid)
+            .init_resource::<BroodStats>()
+            .add_systems(Update, age_out);
+        app.world_mut().spawn(Ant {
+            pos: Vec2::new(128.0, (INITIAL_SURFACE + 12) as f32),
+            heading: Vec2::X,
+            vel: Vec2::ZERO,
+            age_days: WORKER_LIFESPAN + 1.0,
+            carrying: Some(9),
+            dig_cooldown: 0.0,
+            haul_time: 0.0,
+            dug_at: Vec2::ZERO,
+            dislodged: 0.0,
+            z: 0.0,
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<BroodStats>().died, 1, "the worker did not age out");
+        let mut ants = app.world_mut().query::<&Ant>();
+        assert_eq!(ants.iter(app.world()).count(), 0, "the body was left behind");
+        assert_eq!(
+            app.world().resource::<SandGrid>().sand_count(),
+            before + 1,
+            "the grain it was carrying was not put back",
+        );
     }
 
     /// A queen with more workers keeps more brood going. The floor matters as much as the

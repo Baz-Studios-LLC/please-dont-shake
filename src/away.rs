@@ -148,7 +148,9 @@ mod tests {
     fn farm(away_days: f64, growing: bool) -> App {
         let mut app = App::new();
         let settings = crate::settings::Settings { away: growing, ..default() };
-        app.insert_resource(settings)
+        // A real grid, because `age_out` puts a dead hauler's grain back into it.
+        app.insert_resource(crate::grid::SandGrid::new())
+            .insert_resource(settings)
             .insert_resource(AwaySpan(away_days))
             .init_resource::<ColonyStep>()
             .init_resource::<BroodStats>()

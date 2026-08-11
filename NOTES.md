@@ -33,17 +33,27 @@ about a pile.
 all three places a grain can hide — grid, particle, mandibles.
 
 The hauling rate is *not* the problem the earlier notes claimed. Measured with the mound
-counted as well as the hole (2026-08-11, 22 ants, 100s of flat sand):
+counted as well as the hole, on a colony run that holds one queen throughout (2026-08-11,
+101 ants at 100s, 125 colony days):
 
-| | dug | excavated | mound | returned |
-|---|---|---|---|---|
-| | 190 | 168 | 164 | 18 (9%) |
+| stage | dug | excavated | mound | returned | sand |
+|---|---|---|---|---|---|
+| 25s | 36 | 35 | 23 | −11 | drift +0 |
+| 60s | 117 | 98 | 98 | 19 (16%) | drift +0 |
+| 100s | 117 | 98 | 98 | 19 (16%) | drift +0 |
 
-`excavated ≈ mound` at every stage is the signature of a healthy dig: what comes out of the
-ground is sitting in the heap. The earlier "67% efficiency" was one run, read without the
-mound, and it was misleading twice over — it counted spoil that was fine, and the harness
-drives on real frame times so run-to-run variance is large. **Always read excavated and
-mound together, and don't conclude anything from a single run.**
+`excavated == mound` is the signature of a healthy dig: what came out of the ground is sitting
+in the heap. Earlier notes quoted 67%, then 9%, and both were read off runs where the harness
+had tipped in a *second* ant kit — see the two-queens section. Every colony number in this file
+before 2026-08-11 is suspect for that reason.
+
+**Always read excavated and mound together, and never conclude anything from a single run** —
+the harness drives on real frame times, so variance is large.
+
+The population settles at **about a hundred** and stays there, which is not a cap anybody
+wrote: `LAY_INTERVAL` allows 2.86 eggs a day and a worker lives 35 days, so the colony
+converges on 2.86 × 35 ≈ 100. DESIGN.md asks for 200–500 at peak, so the lever when that
+matters is the laying interval, not the lifespan.
 
 **Persistence is done**, brood included. One farm, saved automatically — no button, no slots.
 Written on leaving play, on quitting, and every 30s in between; restored at startup before the
@@ -90,7 +100,9 @@ must also skip `setup_offscreen_target` for them. Miss the second half and the o
 is pointed at the texture, Bevy UI draws to whichever camera is on the window, and the
 screenshot is a convincing sheet of black.
 
-The number that matters most is total sand. It must stay exactly constant.
+The number that matters most is total sand. It must stay exactly constant — `drift +0` at
+every stage of every run, including mid-shake. It is the only assertion here that has ever
+caught a leak nobody suspected, and it has now done it twice.
 
 ## Traps already paid for
 
@@ -123,6 +135,17 @@ Things that cost real time and will look like new bugs if forgotten.
   leaves it in the layout, so a tabbed window reserved room for every pane at once and the
   open one sat in a column of gaps. Ordo's tabs use `Display::None` now; remember it for
   anything else that hides.
+- **Anything that despawns an ant has to put its grain back.** A worker that died of old age
+  while hauling deleted the grain in its mandibles: 25344 sand cells down to 25330 over 229
+  deaths, a tenth of a percent, invisible by eye and permanent. Sand lives in three places —
+  the grid, a falling particle, an ant's mandibles — and *every* exit from the third one has to
+  return it. `crate::grains::settle` is the way to do it; it searches upward for air, so it
+  can't overwrite. The same rule will apply to predation, to the midden, and to anything else
+  that ever removes an ant.
+- **A frozen counter says a system stopped, not why it stopped.** Systems that `return` early
+  on a missing resource or a failed `single()` log nothing at all, and any stats they own then
+  read as a frozen simulation. Print a census of the world before theorising — see the
+  two-queens section for what the alternative costs.
 - **Bevy only compiles in Vorbis by default.** `wav`, `mp3` and `flac` are opt-in features.
   A perfectly valid WAV panicked the audio system and left a window with nothing in it.
   Ship OGG.
