@@ -206,6 +206,16 @@ impl SandGrid {
         self.loose[Self::idx(x, y)] = false;
     }
 
+    /// Write a cell and its loose flag, waking nothing. For restoring a saved farm, which
+    /// wakes and remeshes the whole grid once at the end rather than forty thousand times
+    /// on the way through.
+    #[inline]
+    pub fn set_raw_with_loose(&mut self, x: usize, y: usize, cell: Cell, loose: bool) {
+        let i = Self::idx(x, y);
+        self.cells[i] = cell;
+        self.loose[i] = loose;
+    }
+
     /// Write a cell and wake the neighbourhood so the sim reacts to it.
     pub fn set(&mut self, x: usize, y: usize, cell: Cell) {
         self.cells[Self::idx(x, y)] = cell;

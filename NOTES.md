@@ -45,7 +45,12 @@ Measured at 100s with 22 ants, on flat sand:
 The remaining third is still worth chasing, but the shape is right now: there is a shaft
 with a crater rim around it, which is what a *Lasius* entrance looks like.
 
-**M3 (demography, persistence) and M4 (Steam) are untouched.**
+**Persistence is done.** One farm, saved automatically — no button, no slots. Written on
+leaving play, on quitting, and every 30s in between; restored at startup before the title
+screen, which is what makes Continue seamless. See [src/save.rs](src/save.rs) for what
+isn't saved and why (the pheromone fields, deliberately).
+
+**The rest of M3 (demography) and M4 (Steam) are untouched.**
 
 ## Verify with the harness, not by eye
 
@@ -63,6 +68,12 @@ cargo run --release -- --capture --splash-shot --out /tmp/shots # three frames a
 The output directory has to exist — the harness won't create it, and a missing one shows
 up only as `Cannot save screenshot` buried in the log while every number still prints
 happily.
+
+**Capture mode never reads or writes the farm on disk.** Loading one would put a colony
+into a measurement meant to start from bare strata, and saving one would replace somebody's
+forty hours of tunnels with a test fixture. Not touching the file at all is the only
+version with no way to get it wrong. `PDS_SAVE_DIR` relocates the save if you need to poke
+at one; the real farm lives in `~/Library/Application Support/Please Don't Shake/`.
 
 Runs render to an **offscreen texture**, not the window, so a locked or sleeping screen
 can't silently produce black frames — that cost an hour once. The two UI shots are the

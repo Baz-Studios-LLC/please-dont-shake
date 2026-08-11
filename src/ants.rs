@@ -358,6 +358,27 @@ fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f32, seed: u32) -> imp
     )
 }
 
+/// An ant put back exactly as it was found, for [`crate::save`].
+///
+/// Founding builds its ants from a seed; this one takes the whole `Ant` as given, because
+/// a restored colony has to come back at the ages and positions it was left at rather than
+/// at plausible ones. The `Queen` marker goes on separately — a bundle can't be two types.
+pub fn body_bundle(assets: &AntAssets, ant: Ant, queen: bool) -> impl Bundle {
+    let material = if queen {
+        assets.queen_mat.clone()
+    } else if ant.carrying.is_some() {
+        assets.laden_mat.clone()
+    } else {
+        assets.worker_mat.clone()
+    };
+    (
+        ant,
+        Mesh3d(assets.worker_mesh.clone()),
+        MeshMaterial3d(material),
+        Transform::default(),
+    )
+}
+
 fn queen_bundle(assets: &AntAssets, pos: Vec2) -> impl Bundle {
     (
         Queen,

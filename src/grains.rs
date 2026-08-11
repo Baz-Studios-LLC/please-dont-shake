@@ -146,7 +146,7 @@ pub fn update_grains(
 /// cell. This must never fail: the farm persists for days, and a grain quietly dropped
 /// on every shake would slowly empty the tank. So if the whole column is packed, fan
 /// outwards until somewhere takes it.
-fn settle(grid: &mut SandGrid, cx: isize, cy: isize, shade: u8) {
+pub fn settle(grid: &mut SandGrid, cx: isize, cy: isize, shade: u8) {
     // Loose, so it rolls off whatever it landed on and the stream heaps into a cone
     // rather than a spire. It packs the moment it runs out of downhill.
     let place = |grid: &mut SandGrid, x: isize, y: isize| {

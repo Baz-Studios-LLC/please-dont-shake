@@ -174,8 +174,11 @@ pub fn on_menu_activate(
 
     // New Game throws the old farm away *now*, so what the fade uncovers is a
     // fresh tank rather than the previous colony blinking out a moment later.
+    // The file goes with it: without that, starting over and then closing the app
+    // would reopen onto the farm that was just abandoned.
     if *action == MenuAction::NewGame {
         commands.run_system_cached(crate::farm::reset_farm);
+        crate::save::forget_farm();
     }
     commands.init_resource::<TitleFade>();
 }

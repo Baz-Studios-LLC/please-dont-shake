@@ -30,11 +30,15 @@ mod pheromones;
 mod pause;
 mod radial;
 mod sand;
+mod save;
 mod splash;
 mod tank;
 mod title;
 
+use std::time::Duration;
+
 use bevy::prelude::*;
+use bevy::time::common_conditions::on_real_timer;
 
 use audio::setup_music;
 
@@ -190,6 +194,33 @@ fn main() {
                 .run_if(in_state(GameState::Playing)),
         )
         .add_systems(Update, devcapture::screenshot_hotkey);
+
+    // Persistence, and deliberately not in capture mode.
+    //
+    // A scripted run must not read or write the player's farm. Reading one would put a
+    // colony into a measurement that is supposed to start from bare strata, and writing
+    // one would replace forty hours of somebody's tunnels with a test fixture. This is
+    // the whole reason the harness is silent about saving rather than pointed at a
+    // scratch directory: not touching the file at all is the only version with no way to
+    // get it wrong.
+    if !devcapture::capture_mode() {
+        app
+            // After the ant assets, which putting a saved colony back needs. Nothing else
+            // has to know it happened — the grid and the ants are simply already there,
+            // and the title screen finds `GameInProgress` true and offers Continue.
+            .add_systems(Startup, save::load_farm.after(setup_ant_assets))
+            .add_systems(OnExit(GameState::Playing), save::save_farm)
+            // On the way out of play, on the way out of the app, and on a timer in
+            // between. The timer is the one that matters: a force-quit, a crash or a flat
+            // battery sends no exit message, and none of them are the player's fault.
+            .add_systems(
+                Update,
+                save::save_farm
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(on_real_timer(Duration::from_secs(save::AUTOSAVE_SECONDS))),
+            )
+            .add_systems(Last, save::save_farm.run_if(on_message::<AppExit>));
+    }
 
     // State registration has to come *after* DefaultPlugins, which is what brings
     // StatesPlugin with it. Verification runs skip the splash and the menu and open

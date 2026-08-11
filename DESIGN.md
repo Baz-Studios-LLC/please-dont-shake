@@ -77,6 +77,13 @@ That is also why there is no **Load**, and never will be. Loading implies slots,
 slots imply the farm is a document you keep copies of. There is one farm. It is the one
 in the tank.
 
+It saves itself. Continuously, on a timer, on leaving play and on quitting — and it is
+restored before the title screen is drawn, so closing the app and opening it again puts
+you back in front of the farm you left with **Continue** waiting. There is no save button
+because there is no decision to make: an ambient game that asked you to remember to save
+it would be asking the wrong thing of you. The player should never learn that a file is
+involved.
+
 So the menu is three entries, and one of them is conditional:
 
 | | |
