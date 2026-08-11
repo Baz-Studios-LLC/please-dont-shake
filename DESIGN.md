@@ -39,7 +39,7 @@ That's the whole emotional mechanism. The player is a vandal, not a murderer.
 | **Tone** | Cozy ambient sandbox. No fail state, no meters, no UI panels. |
 | **Reference** | *Mountain*. $0.99, impulse buy, lives in a window. |
 | **Time** | **Real time, throughout.** A colony day is a day. Nothing compresses — not the sand, not the ants, not the brood. Egg to worker takes about a week of wall-clock time. |
-| **Offline** | Paused when closed. You never return to a disaster you couldn't prevent. |
+| **Offline** | **The colony lives while the app is shut, and it's a setting.** Only biology — brood, ageing, laying. Nothing digs, nothing collapses, no grain moves, so you still never return to a disaster you couldn't prevent. Turn it off and the tank waits. |
 | **Ending** | Natural lifespan. The queen's sperm reserve runs out and the colony winds down — on a real-time clock that is a matter of months, not an evening. |
 | **Text** | **None inside the tank, ever.** Behaviour is the only channel. |
 | **Grimness** | Full biological accuracy, presented plainly. No music sting, no camera push. It's just what happens. |
@@ -117,6 +117,31 @@ So the menu is three entries, and one of them is conditional:
 Continue is *absent* rather than dimmed on a first run, because it isn't an unfinished
 feature — it's a statement about the farm, and a greyed-out Continue would be claiming a
 farm exists when none does.
+
+#### While you were away
+
+A colony day takes a day, so the farm has to keep living with the app shut or it never
+lives at all: six days from egg to worker is a hundred and forty-four hours of playing,
+and nobody plays a window ornament for a hundred and forty-four hours to watch one egg
+hatch. Coming back to a farm that has *moved on* is the whole point of a real-time clock,
+and it's what an ant farm on a shelf does.
+
+Only biology is settled up. The brood advances, pupae eclose, workers age, the oldest die,
+and the queen goes on laying. Nothing walks and nothing digs — the tunnels are exactly as
+you left them, down to the grain. That split keeps the original promise on this row: the
+farm can't have a disaster while you're gone, because the only thing that can wreck a farm
+is a hand on the glass and yours was elsewhere. The colony also replaces itself, so a
+fortnight away is a workforce turned over rather than a colony lost.
+
+It's a setting because it's a real preference and not a technical detail — some people will
+want the tank exactly as they left it — and it's **on** by default because that is what the
+clock means.
+
+One consequence to face when the ending is built (M3): with this on, a farm abandoned for
+months can be over when you come back to it. That is the honest reading of a natural
+lifespan on a real clock, and it is the one place where "you never return to a disaster" and
+"the colony ages while you're away" genuinely pull against each other. The cap on a single
+catch-up is three months, which is the same statement in code.
 
 ### The voice
 

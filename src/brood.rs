@@ -24,7 +24,7 @@
 
 use bevy::prelude::*;
 
-use crate::ants::{Ant, AntAssets, ColonyClock, Job, Queen, body_bundle};
+use crate::ants::{Ant, AntAssets, ColonyStep, Job, Queen, body_bundle};
 use crate::grid::*;
 use crate::tank::TankRoot;
 
@@ -107,6 +107,32 @@ pub struct BroodAssets {
     pupa: Handle<StandardMaterial>,
 }
 
+impl BroodAssets {
+    fn material_for(&self, stage: Stage) -> Handle<StandardMaterial> {
+        match stage {
+            Stage::Egg => self.egg.clone(),
+            Stage::Larva => self.larva.clone(),
+            Stage::Pupa => self.pupa.clone(),
+        }
+    }
+}
+
+/// Everything that makes one brood item exist. Laying uses it, and so does restoring a saved
+/// farm — the pile that comes back off disk has to be built the same way as the pile that was
+/// laid, or the two paths drift and only one of them gets tested.
+///
+/// The `Transform` is a placeholder; `sync_brood_transforms` overwrites it on the first frame
+/// from the item's own grid position.
+pub fn brood_bundle(assets: &BroodAssets, item: Brood) -> impl Bundle {
+    let material = assets.material_for(item.stage);
+    (
+        Mesh3d(assets.mesh.clone()),
+        MeshMaterial3d(material),
+        Transform::default(),
+        item,
+    )
+}
+
 /// How long since the queen last laid, in colony-days.
 #[derive(Resource, Default)]
 pub struct LayClock(f64);
@@ -153,8 +179,7 @@ pub fn setup_brood_assets(
 /// The queen lays, if she has room for another.
 pub fn lay_eggs(
     mut commands: Commands,
-    time: Res<Time>,
-    clock: Res<ColonyClock>,
+    step: Res<ColonyStep>,
     mut lay: ResMut<LayClock>,
     mut stats: ResMut<BroodStats>,
     assets: Option<Res<BroodAssets>>,
@@ -167,11 +192,15 @@ pub fn lay_eggs(
         return;
     };
 
-    lay.0 += time.delta_secs() as f64 * clock.days_per_second;
+    lay.0 += step.0;
     if lay.0 < LAY_INTERVAL {
         return;
     }
-    lay.0 = 0.0;
+    // Subtract rather than zero. Zeroing throws away the overshoot, which is nothing at a
+    // sixtieth of a second and is most of the interval when `crate::away` steps the same
+    // system forward a tenth of a day at a time — the queen would lay at whatever rate the
+    // catch-up happened to step at instead of her own.
+    lay.0 -= LAY_INTERVAL;
 
     let clutch = BASE_CLUTCH + (workers.iter().count() as f32 * CLUTCH_PER_WORKER) as usize;
     if brood.iter().count() >= clutch {
@@ -180,21 +209,15 @@ pub fn lay_eggs(
 
     // Laid where she stands. Nurses take it from there — and where she stands is already the
     // deepest the colony has got, so the first eggs of a farm are on the pile by definition.
-    commands.spawn((
-        Brood { stage: Stage::Egg, age_days: 0.0, pos: queen.pos, held_by: None },
-        Mesh3d(assets.mesh.clone()),
-        MeshMaterial3d(assets.egg.clone()),
-        Transform::default(),
-        ChildOf(tank),
-    ));
+    let egg = Brood { stage: Stage::Egg, age_days: 0.0, pos: queen.pos, held_by: None };
+    commands.spawn((brood_bundle(&assets, egg), ChildOf(tank)));
     stats.laid += 1;
 }
 
 /// Brood ages, changes stage, and eventually walks away.
 pub fn age_brood(
     mut commands: Commands,
-    time: Res<Time>,
-    clock: Res<ColonyClock>,
+    step: Res<ColonyStep>,
     ants: Res<AntAssets>,
     assets: Option<Res<BroodAssets>>,
     mut stats: ResMut<BroodStats>,
@@ -204,7 +227,7 @@ pub fn age_brood(
     let (Some(assets), Ok(tank)) = (assets, tank.single()) else {
         return;
     };
-    let days = time.delta_secs() as f64 * clock.days_per_second;
+    let days = step.0;
 
     for (entity, mut item, mut material) in &mut brood {
         item.age_days += days;
@@ -214,23 +237,25 @@ pub fn age_brood(
 
         match item.stage.next() {
             Some(stage) => {
+                // Carry the overshoot into the new stage rather than dropping it, for the
+                // reason spelled out in `lay_eggs`: `crate::away` steps this a tenth of a day
+                // at a time, and a stage that started from zero each time would run long by
+                // however much of the step was left over. Subtract before reassigning — the
+                // debt belongs to the stage being left.
+                item.age_days -= item.stage.lasts();
                 item.stage = stage;
-                item.age_days = 0.0;
-                material.0 = match stage {
-                    Stage::Egg => assets.egg.clone(),
-                    Stage::Larva => assets.larva.clone(),
-                    Stage::Pupa => assets.pupa.clone(),
-                };
+                material.0 = assets.material_for(stage);
             }
             None => {
-                // Eclosion. A worker at age zero, which `Job::for_age` picks up as a nurse
-                // with no changes — the labour split has been waiting for this since it was
-                // written.
+                // Eclosion. A worker at the age it has already earned — which is nothing in
+                // play and can be most of a step during a catch-up — and `Job::for_age` picks
+                // that up as a nurse with no changes. The labour split has been waiting for
+                // this since it was written.
                 let ant = Ant {
                     pos: item.pos,
                     heading: Vec2::X,
                     vel: Vec2::ZERO,
-                    age_days: 0.0,
+                    age_days: item.age_days - item.stage.lasts(),
                     carrying: None,
                     dig_cooldown: 0.0,
                     haul_time: 0.0,
@@ -370,6 +395,17 @@ pub fn sync_brood_transforms(mut brood: Query<(&Brood, &mut Transform)>) {
             Stage::Larva => 1.0,
             Stage::Pupa => 1.25,
         });
+    }
+}
+
+/// Dummy handles. See [`crate::ants::stub_assets`].
+#[cfg(test)]
+pub(crate) fn stub_assets() -> BroodAssets {
+    BroodAssets {
+        mesh: Handle::default(),
+        egg: Handle::default(),
+        larva: Handle::default(),
+        pupa: Handle::default(),
     }
 }
 

@@ -37,11 +37,16 @@ pub struct Settings {
     pub shake: u8,
     /// The hand's skin, as an index into [`SKIN_TONES`].
     pub skin: u8,
+    /// Whether the colony lives while the app is closed. See [`crate::away`].
+    pub away: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { fullscreen: false, music: 3, shake: 1, skin: 1 }
+        // Growing while away is on by default, because it is what the real-time clock means.
+        // A colony day takes a day, so a farm that only aged while it was being watched would
+        // take a hundred and forty-four hours of play to hatch one egg.
+        Self { fullscreen: false, music: 3, shake: 1, skin: 1, away: true }
     }
 }
 
@@ -132,6 +137,7 @@ pub enum Control {
     Music,
     Shake,
     Skin,
+    Away,
 }
 
 /// A nudge on a control: which one, and which way.
@@ -193,7 +199,7 @@ const TABS: [&str; 3] = ["Video", "Audio", "Gameplay"];
 ///
 /// A table rather than three hand-built panes. The window's shape stops being something to
 /// maintain and becomes something to read, and adding a setting is one line here.
-const ROWS: [(usize, Control, &str, &str); 4] = [
+const ROWS: [(usize, Control, &str, &str); 5] = [
     (
         0,
         Control::Fullscreen,
@@ -208,6 +214,12 @@ const ROWS: [(usize, Control, &str, &str); 4] = [
         "How hard your hand moves the tank.",
     ),
     (2, Control::Skin, "Hand", "Your hand. It is the only part of you in the room."),
+    (
+        2,
+        Control::Away,
+        "Grow while closed",
+        "The colony keeps living when the game isn't running. Nothing digs while you're gone.",
+    ),
 ];
 
 /// Build and tear down the window to follow the flag.
@@ -315,6 +327,7 @@ fn reading_for(control: Control, settings: &Settings) -> String {
         Control::Music => settings.music_name().to_string(),
         Control::Shake => settings.shake_name().to_string(),
         Control::Skin => settings.skin_name().to_string(),
+        Control::Away => if settings.away { "On" } else { "Off" }.to_string(),
     }
 }
 
@@ -347,6 +360,7 @@ pub fn on_control_activate(
         // Two states, so either arrow flips it. Refusing one of them would be technically
         // consistent and would read as a broken button.
         Control::Fullscreen => settings.fullscreen = !settings.fullscreen,
+        Control::Away => settings.away = !settings.away,
         Control::Music => settings.music = step(settings.music, *up, MUSIC_STEPS.len()),
         Control::Shake => settings.shake = step(settings.shake, *up, SHAKE_STEPS.len()),
         Control::Skin => settings.skin = step(settings.skin, *up, SKIN_TONES.len()),
@@ -524,7 +538,8 @@ mod tests {
     /// end of a table. `serde(default)` covers missing fields; this covers wrong ones.
     #[test]
     fn a_nonsense_value_is_clamped_rather_than_fatal() {
-        let settings = Settings { fullscreen: false, music: 200, shake: 200, skin: 200 };
+        let settings =
+            Settings { fullscreen: false, music: 200, shake: 200, skin: 200, away: true };
         assert_eq!(settings.music_volume(), MUSIC_STEPS[MUSIC_STEPS.len() - 1].0);
         assert_eq!(settings.shake_scale(), SHAKE_STEPS[SHAKE_STEPS.len() - 1].0);
         assert_eq!(settings.skin_name(), SKIN_TONES[SKIN_TONES.len() - 1].1);

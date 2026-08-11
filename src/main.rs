@@ -20,6 +20,7 @@
 
 mod ants;
 mod audio;
+mod away;
 mod brood;
 mod devcapture;
 mod farm;
@@ -47,7 +48,10 @@ use audio::setup_music;
 
 use title::GameState;
 
-use ants::{ColonyClock, setup_ant_assets, sync_ant_transforms, update_ants};
+use ants::{
+    ColonyClock, ColonyStep, advance_colony_clock, age_ants, setup_ant_assets,
+    sync_ant_transforms, update_ants,
+};
 use grains::{setup_grain_assets, spawn_queued_grains, update_grains};
 use grid::{SandGrid, SandPalette, fill_strata};
 use interact::{PointerState, pointer_input};
@@ -119,6 +123,8 @@ fn main() {
         .init_resource::<TankSpring>()
         .init_resource::<PointerState>()
         .init_resource::<ColonyClock>()
+        .init_resource::<ColonyStep>()
+        .init_resource::<away::AwaySpan>()
         .init_resource::<ants::ColonyStats>()
         .insert_resource(Pheromones::new())
         .insert_resource(NavField::new())
@@ -175,10 +181,13 @@ fn main() {
         .add_systems(
             FixedUpdate,
             (
+                // How much colony time this tick is worth, before anything spends it.
+                advance_colony_clock,
                 // Fields first, so the ants act on a current view of the nest; then the
                 // ants, who dig; then the sand, which reacts to what they dug.
                 (rebuild_nav_field, diffuse_pheromones).run_if(every_fourth_tick),
                 update_ants,
+                age_ants,
                 // The colony's other half. After the ants, so a nurse that has just moved
                 // carries its brood to where it now is rather than to where it was; before
                 // the sand, so a collapse this tick is what `unbury_brood` answers.
@@ -258,7 +267,15 @@ fn main() {
             // After the ant assets, which putting a saved colony back needs. Nothing else
             // has to know it happened — the grid and the ants are simply already there,
             // and the title screen finds `GameInProgress` true and offers Continue.
-            .add_systems(Startup, save::load_farm.after(setup_ant_assets))
+            // After the tank, and therefore after the ant and brood assets that come before
+            // it in the same chain: restoring a farm means spawning bodies and a pile, and
+            // parenting both to the tank they live in.
+            .add_systems(
+                Startup,
+                (save::load_farm, away::catch_up_while_away)
+                    .chain()
+                    .after(setup_tank),
+            )
             .add_systems(OnExit(GameState::Playing), save::save_farm)
             // On the way out of play, on the way out of the app, and on a timer in
             // between. The timer is the one that matters: a force-quit, a crash or a flat

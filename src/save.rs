@@ -31,11 +31,14 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ants::{Ant, AntAssets, KitPour, Queen, body_bundle};
+use crate::ants::{Ant, AntAssets, ColonyClock, KitPour, Queen, body_bundle};
+use crate::away::AwaySpan;
+use crate::brood::{Brood, BroodAssets, Stage, brood_bundle};
 use crate::farm::GameInProgress;
 use crate::grains::Grain;
 use crate::grid::*;
 use crate::radial::Stock;
+use crate::tank::TankRoot;
 
 /// How often a farm being played is written down.
 ///
@@ -101,6 +104,15 @@ pub struct Snapshot {
     /// A kit that was still pouring in, so closing the app mid-tip doesn't eat the rest
     /// of the colony.
     pour: Option<SavedPour>,
+    /// The pile. Added after the format was already in the wild, so it defaults to empty
+    /// rather than making an existing farm unreadable — a colony that comes back without its
+    /// eggs is a disappointment, and a colony that doesn't come back at all is a bug report.
+    #[serde(default)]
+    brood: Vec<SavedBrood>,
+    /// Unix seconds when this was written, for [`crate::away`]. Zero means a file from before
+    /// this existed, which is read as "no idea how long ago" and therefore no catch-up.
+    #[serde(default)]
+    saved_at: u64,
 }
 
 /// Written out field by field rather than by deriving on `Ant` itself.
@@ -121,6 +133,47 @@ struct SavedAnt {
     dug_at: [f32; 2],
     dislodged: f32,
     z: f32,
+}
+
+/// A brood item. Stage as a small integer rather than the enum's name, so renaming a variant
+/// in the simulation can't quietly invalidate every save on disk.
+///
+/// What's missing is deliberate: `held_by` is an `Entity`, and an entity id means nothing in
+/// the next process. Brood in a nurse's mandibles is set down where it was — the nurse, or
+/// another one, picks it up again within a second of play.
+#[derive(Serialize, Deserialize)]
+struct SavedBrood {
+    stage: u8,
+    age_days: f64,
+    pos: [f32; 2],
+}
+
+fn stage_code(stage: Stage) -> u8 {
+    match stage {
+        Stage::Egg => 0,
+        Stage::Larva => 1,
+        Stage::Pupa => 2,
+    }
+}
+
+fn stage_of(code: u8) -> Stage {
+    match code {
+        1 => Stage::Larva,
+        2 => Stage::Pupa,
+        _ => Stage::Egg,
+    }
+}
+
+/// Wall-clock seconds since the epoch, or zero if the machine won't say.
+///
+/// The one piece of state in this file that isn't the farm: it is what lets the colony have
+/// lived while the app was shut. A clock that has been wound backwards since the save reads as
+/// zero elapsed rather than as negative time — see `load_farm`.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -243,6 +296,7 @@ fn wake_everything(grid: &mut SandGrid) {
 pub fn save_farm(
     grid: Res<SandGrid>,
     ants: Query<(&Ant, Has<Queen>)>,
+    brood: Query<&Brood>,
     grains: Query<&Transform, With<Grain>>,
     grain_shades: Query<&Grain>,
     stock: Res<Stock>,
@@ -274,6 +328,15 @@ pub fn save_farm(
         })
         .collect();
 
+    let brood: Vec<SavedBrood> = brood
+        .iter()
+        .map(|item| SavedBrood {
+            stage: stage_code(item.stage),
+            age_days: item.age_days,
+            pos: item.pos.to_array(),
+        })
+        .collect();
+
     // Where a flying grain would have landed, near enough. It goes back into the grid on
     // load rather than back into the air: mass is what has to survive, not the arc.
     let in_flight: Vec<SavedGrain> = grains
@@ -294,6 +357,8 @@ pub fn save_farm(
         cells,
         loose,
         ants,
+        brood,
+        saved_at: now_secs(),
         grains: in_flight,
         kits: stock.kits,
         pour: (pour.remaining > 0).then(|| SavedPour {
@@ -341,9 +406,17 @@ pub fn load_farm(
     mut stock: ResMut<Stock>,
     mut pour: ResMut<KitPour>,
     mut progress: ResMut<GameInProgress>,
+    mut away: ResMut<AwaySpan>,
+    clock: Res<ColonyClock>,
     assets: Res<AntAssets>,
+    brood_assets: Option<Res<BroodAssets>>,
+    tank: Query<Entity, With<TankRoot>>,
 ) {
     let Some(snapshot) = read() else {
+        return;
+    };
+    let Ok(tank) = tank.single() else {
+        warn!("no tank to put a saved farm into; starting fresh");
         return;
     };
 
@@ -373,10 +446,40 @@ pub fn load_farm(
             dislodged: saved.dislodged,
             z: saved.z,
         };
-        let entity = commands.spawn(body_bundle(&assets, ant, saved.queen)).id();
+        // Parented to the tank, like every other ant. Without this a restored colony sits
+        // in world space and stops moving when the tank does — the farm would shake around
+        // ants that hung in the air where the glass used to be.
+        let entity = commands
+            .spawn((body_bundle(&assets, ant, saved.queen), ChildOf(tank)))
+            .id();
         if saved.queen {
             commands.entity(entity).insert(Queen);
         }
+    }
+
+    // The pile. Only if the assets exist — they are made in the same startup chain, and a
+    // farm restored without them would be brood that is real to the simulation and invisible.
+    if let Some(brood_assets) = brood_assets {
+        for saved in &snapshot.brood {
+            let item = Brood {
+                stage: stage_of(saved.stage),
+                age_days: saved.age_days,
+                pos: Vec2::from_array(saved.pos),
+                held_by: None,
+            };
+            commands.spawn((brood_bundle(&brood_assets, item), ChildOf(tank)));
+        }
+    } else if !snapshot.brood.is_empty() {
+        warn!("the brood assets were not ready; {} eggs lost", snapshot.brood.len());
+    }
+
+    // How long the app was shut, in colony-days, for `crate::away` to settle up. Saturating,
+    // so a clock that has been wound back since the save is no time at all rather than
+    // negative time — and `saved_at` is zero on a file written before it was recorded, which
+    // reads the same way.
+    if snapshot.saved_at > 0 {
+        let seconds = now_secs().saturating_sub(snapshot.saved_at);
+        away.0 = seconds as f64 * clock.days_per_second;
     }
 
     stock.kits = snapshot.kits;
@@ -392,8 +495,9 @@ pub fn load_farm(
     // There is a farm, so the title screen offers Continue.
     progress.0 = true;
     info!(
-        "farm restored: {} ants, {} sand cells",
+        "farm restored: {} ants, {} brood, {} sand cells",
         snapshot.ants.len(),
+        snapshot.brood.len(),
         grid.sand_count()
     );
 }
@@ -489,18 +593,6 @@ mod tests {
         assert_eq!(back.sand_count(), grid.sand_count(), "the mass changed");
     }
 
-    /// Dummy handles. Restoring a colony needs `AntAssets` to build bodies from, and
-    /// nothing in this test looks at what they point to — which is the useful part: the
-    /// save path can be exercised without a renderer.
-    fn stub_assets() -> AntAssets {
-        AntAssets {
-            worker_mesh: Handle::default(),
-            worker_mat: Handle::default(),
-            queen_mat: Handle::default(),
-            laden_mat: Handle::default(),
-        }
-    }
-
     fn test_ant(pos: Vec2, age_days: f64, carrying: Option<u8>) -> Ant {
         Ant {
             pos,
@@ -544,12 +636,28 @@ mod tests {
             .insert_resource(Stock { kits: 0 })
             .init_resource::<KitPour>()
             .insert_resource(GameInProgress(true))
-            .insert_resource(stub_assets())
+            .insert_resource(crate::ants::stub_assets())
             .add_systems(Update, save_farm);
         let queen = test_ant(Vec2::new(128.0, 45.0), 402.5, None);
         let worker = test_ant(Vec2::new(130.0, 96.0), 12.25, Some(21));
         app.world_mut().spawn((queen, Queen));
         app.world_mut().spawn(worker);
+        // One of each stage, so a mixed-up stage code shows as a wrong count rather than
+        // being masked by everything being an egg.
+        app.world_mut().spawn(Brood {
+            stage: Stage::Larva,
+            age_days: 1.75,
+            pos: Vec2::new(126.0, 44.0),
+            held_by: None,
+        });
+        app.world_mut().spawn(Brood {
+            stage: Stage::Pupa,
+            age_days: 0.5,
+            pos: Vec2::new(127.0, 44.0),
+            // Held. The nurse is an entity id that means nothing next time, so this has to
+            // come back set down rather than come back pointing at whatever now owns 3v1.
+            held_by: Some(Entity::from_raw_u32(3).unwrap()),
+        });
         app.update();
 
         assert!(save_path().is_file(), "closing the app wrote no farm");
@@ -560,8 +668,12 @@ mod tests {
             .insert_resource(Stock { kits: 7 })
             .init_resource::<KitPour>()
             .insert_resource(GameInProgress(false))
-            .insert_resource(stub_assets())
+            .insert_resource(crate::ants::stub_assets())
+            .insert_resource(crate::brood::stub_assets())
+            .init_resource::<ColonyClock>()
+            .init_resource::<AwaySpan>()
             .add_systems(Update, load_farm);
+        let tank = next.world_mut().spawn(TankRoot).id();
         next.update();
 
         let restored = next.world().resource::<SandGrid>();
@@ -582,6 +694,73 @@ mod tests {
             next.world().resource::<Stock>().kits,
             0,
             "stock was not restored — the kit would come back after being used",
+        );
+
+        // The pile, and the tank it belongs to. An ant or an egg that comes back unparented
+        // renders in world space and stops moving when the tank shakes.
+        let mut brood = next.world_mut().query::<(&Brood, &ChildOf)>();
+        let mut pile: Vec<(Stage, f64, bool)> = brood
+            .iter(next.world())
+            .map(|(item, parent)| (item.stage, item.age_days, parent.parent() == tank))
+            .collect();
+        pile.sort_by(|a, b| a.1.total_cmp(&b.1));
+        assert_eq!(
+            pile,
+            vec![(Stage::Pupa, 0.5, true), (Stage::Larva, 1.75, true)],
+            "the brood did not come back as it was laid down",
+        );
+        assert!(
+            brood.iter(next.world()).all(|(item, _)| item.held_by.is_none()),
+            "brood came back still in the mandibles of an ant that no longer exists",
+        );
+        let mut bodies = next.world_mut().query::<(&Ant, &ChildOf)>();
+        assert!(
+            bodies.iter(next.world()).all(|(_, parent)| parent.parent() == tank),
+            "a restored ant was not put back in the tank",
+        );
+
+        // ---- and the session that opens it a week later -------------------
+        //
+        // The same two systems main.rs chains at startup, against the same file with its
+        // timestamp wound back. This is the join between the two features: `load_farm`
+        // spawns the colony through `Commands`, and the catch-up is what has to see it — a
+        // missing sync point here would settle up an empty tank and nobody would notice,
+        // because a farm that comes back unaged looks exactly like a farm nobody left.
+        let mut snapshot = read().expect("the farm just written cannot be read back");
+        snapshot.saved_at -= 7 * 86_400;
+        write(&snapshot).expect("the backdated farm could not be written");
+
+        let mut later = App::new();
+        later
+            .insert_resource(SandGrid::new())
+            .insert_resource(Stock { kits: 7 })
+            .init_resource::<KitPour>()
+            .insert_resource(GameInProgress(false))
+            .insert_resource(crate::ants::stub_assets())
+            .insert_resource(crate::brood::stub_assets())
+            .init_resource::<ColonyClock>()
+            .init_resource::<AwaySpan>()
+            .init_resource::<crate::ants::ColonyStep>()
+            .init_resource::<crate::brood::BroodStats>()
+            .init_resource::<crate::brood::LayClock>()
+            .init_resource::<crate::settings::Settings>()
+            .add_systems(
+                Startup,
+                (load_farm, crate::away::catch_up_while_away).chain(),
+            );
+        later.world_mut().spawn(TankRoot);
+        later.update();
+
+        let mut queens = later.world_mut().query_filtered::<&Ant, With<Queen>>();
+        let queen_age = queens.iter(later.world()).next().expect("no queen came back").age_days;
+        assert!(
+            (queen_age - 409.5).abs() < 0.01,
+            "a week away aged the queen {} days",
+            queen_age - 402.5,
+        );
+        assert!(
+            later.world().resource::<crate::brood::BroodStats>().eclosed >= 2,
+            "neither the larva nor the pupa hatched in a week away",
         );
 
         let mut ants = next.world_mut().query::<(&Ant, Has<Queen>)>();

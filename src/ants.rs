@@ -540,7 +540,6 @@ pub fn update_ants(
     mut grid: ResMut<SandGrid>,
     mut ph: ResMut<Pheromones>,
     nav: Res<NavField>,
-    colony_day_per_sec: Res<ColonyClock>,
     mut stats: ResMut<ColonyStats>,
     mut ants: Query<(&mut Ant, Has<Queen>)>,
 ) {
@@ -557,8 +556,6 @@ pub fn update_ants(
     stats.at_the_glass = 0;
 
     for (mut ant, is_queen) in &mut ants {
-        ant.age_days += dt as f64 * colony_day_per_sec.days_per_second;
-
         let (cx, cy) = cell_of(ant.pos);
         let (ux, uy) = (
             cx.clamp(0, GRID_W as isize - 1) as usize,
@@ -1022,6 +1019,36 @@ pub struct ColonyClock {
     pub days_per_second: f64,
 }
 
+/// How much colony time this step covers, in days. Everything biological reads this and
+/// nothing biological reads [`Time`] directly.
+///
+/// The indirection buys one thing, and it is the reason it exists: [`crate::away`] can put a
+/// day in here and run the same laying, ageing and eclosion the live game runs, over and over,
+/// to settle up the time the app was closed for. A system that took its step from `Time`
+/// instead would be a system the catch-up could not drive, and the rules would have to exist
+/// twice — once for playing and once for having been away. They would then drift.
+#[derive(Resource, Default)]
+pub struct ColonyStep(pub f64);
+
+/// One tick of colony time. First in the fixed schedule, so everything after it agrees.
+pub fn advance_colony_clock(
+    time: Res<Time>,
+    clock: Res<ColonyClock>,
+    mut step: ResMut<ColonyStep>,
+) {
+    step.0 = time.delta_secs() as f64 * clock.days_per_second;
+}
+
+/// Everybody gets older.
+///
+/// Its own system rather than a line inside `update_ants`, so a colony can be aged without
+/// being moved — nobody walks or digs while the app is shut.
+pub fn age_ants(step: Res<ColonyStep>, mut ants: Query<&mut Ant>) {
+    for mut ant in &mut ants {
+        ant.age_days += step.0;
+    }
+}
+
 impl Default for ColonyClock {
     fn default() -> Self {
         // Real time. A colony day takes a day.
@@ -1102,6 +1129,19 @@ pub fn pour_kit(
     }
 
     pour.remaining -= 1;
+}
+
+/// Dummy handles, for tests that need a colony but not a renderer. Nothing looks at what
+/// they point to — which is the useful part: the save path and the away catch-up can spawn
+/// real ants in a headless `App`.
+#[cfg(test)]
+pub(crate) fn stub_assets() -> AntAssets {
+    AntAssets {
+        worker_mesh: Handle::default(),
+        worker_mat: Handle::default(),
+        queen_mat: Handle::default(),
+        laden_mat: Handle::default(),
+    }
 }
 
 #[cfg(test)]

@@ -45,10 +45,11 @@ mound, and it was misleading twice over — it counted spoil that was fine, and 
 drives on real frame times so run-to-run variance is large. **Always read excavated and
 mound together, and don't conclude anything from a single run.**
 
-**Persistence is done.** One farm, saved automatically — no button, no slots. Written on
-leaving play, on quitting, and every 30s in between; restored at startup before the title
-screen, which is what makes Continue seamless. See [src/save.rs](src/save.rs) for what
-isn't saved and why (the pheromone fields, deliberately).
+**Persistence is done**, brood included. One farm, saved automatically — no button, no slots.
+Written on leaving play, on quitting, and every 30s in between; restored at startup before the
+title screen, which is what makes Continue seamless. See [src/save.rs](src/save.rs) for what
+isn't saved and why (the pheromone fields, deliberately). The colony also keeps living while
+the app is shut — see the clock section below.
 
 **The rest of M3 (demography) and M4 (Steam) are untouched.**
 
@@ -204,6 +205,32 @@ anything at all about brood.
 If the farm ever feels dead rather than slow, the honest levers are the three stage constants
 in `src/brood.rs`, not the clock.
 
+### And the farm lives while the app is shut
+
+Which is what makes the above liveable, and is Brett's call as a setting — Gameplay ▸ *Grow
+while closed*, on by default. `src/away.rs`. The save records `saved_at`; `load_farm` turns the
+gap into colony-days through the *clock's own rate*, so this follows the clock rather than
+assuming a day per day; `catch_up_while_away` spends it.
+
+The mechanism is the part worth protecting: it runs **the game's own systems** in a loop with
+`ColonyStep` set to a tenth of a day instead of a sixtieth of a second. `lay_eggs`, `age_ants`,
+`age_brood`, `age_out` — the same four, in the same order the fixed schedule runs them, minus
+everything that involves moving. The alternative was a closed-form "resolve N days" function,
+which is a second copy of the rules that only runs at startup, and therefore the copy nobody
+notices has drifted. This is why `ColonyStep` exists at all and why nothing biological reads
+`Time` directly any more.
+
+Two things had to change to make stepping honest, and both were latent bugs at any rate:
+`lay_eggs` now *subtracts* the interval instead of zeroing its clock, and `age_brood` carries a
+stage's overshoot into the next stage instead of resetting to zero. At a sixtieth of a second
+the discarded remainder was invisible; at a tenth of a day it was most of the step, and the
+queen would have laid at whatever rate the catch-up happened to step at.
+
+Nothing digs while you're away, and that is a design statement rather than a shortcut — see
+DESIGN.md's Offline row. Sand needs two hundred ants reading a pheromone field sixty times a
+second, and guessing where they would have dug would be inventing a farm rather than continuing
+one.
+
 ### Colony-days are `f64`, and that is not a preference
 
 Setting the rate to real time is not the same as the clock working. At `1/86400` days per
@@ -262,12 +289,15 @@ Workers now die at `WORKER_LIFESPAN`. Without it the age model was a ramp: at sp
 seconds produced a hundred ants of which none dug and eighty-five patrolled, because
 everybody was old. Population should be a curve.
 
-Not yet done: **brood is not saved**. Closing the app loses the pile, which is wrong and is a
-`#[serde(default)]` Vec away from being right in `src/save.rs`.
+The brood **is** saved now, and so is the moment the file was written — which is what the away
+catch-up spends. `held_by` is deliberately not saved: an `Entity` means nothing in the next
+process, so brood in a nurse's mandibles comes back set down and is picked up again within a
+second of play. Stage goes to disk as a small integer, so renaming a variant can't invalidate
+every save on disk.
 
 ## Not yet done
 
-- Spoil-hauling rate (the open M2 task above) — 67% and worth pushing further.
+- Spoil-hauling rate (the open M2 task above) — 9% returned, and worth pushing further.
 - CHANGELOG.md still has `## v0.1.0` at the top, and the release workflow turns whatever
   is top into the release notes. Everything since then needs a section written before the
   next tag, or the next release ships v0.1.0's notes.
