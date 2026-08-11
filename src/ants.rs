@@ -166,7 +166,12 @@ pub struct ColonyStats {
     pub falling: usize,
     pub panicking: usize,
     pub diggers: usize,
+    /// Boxed in *this tick* — every direction refused. A handful is normal in a tight
+    /// tunnel; a steady count is the signature of ants stuck on the spot.
     pub walled_in: usize,
+    /// Standing within a cell of the side glass. Should be ~0: an ant cannot hold glass, so
+    /// anything living there is being propped up by a bug.
+    pub at_the_glass: usize,
     pub drop_failed: u64,
     pub dropped_inside: u64,
 }
@@ -485,14 +490,24 @@ fn is_free(grid: &SandGrid, pos: Vec2) -> bool {
 /// The pit was an artifact of the fixture, not of the rule.
 fn touching_sand(grid: &SandGrid, pos: Vec2) -> bool {
     let (x, y) = cell_of(pos);
-    NEIGHBOURS_8
-        .iter()
-        .any(|(dx, dy)| !grid.is_air(x + dx, y + dy))
+    // In bounds, deliberately. `is_air` answers *for the sand*, and for the sand the walls
+    // and the floor are solid — that is how a heap rests against the glass instead of
+    // pouring through it. For an ant they are glass, and glass is the one surface it cannot
+    // hold.
+    //
+    // Without the bounds check an ant against the left wall has a neighbour at x = -1 that
+    // reports "not air", so the glass counts as footing: ants walked to the edge of the tank
+    // and stood there indefinitely, held up by the window. The module already claimed to
+    // refuse glass; this is the hole it was refusing it through.
+    NEIGHBOURS_8.iter().any(|(dx, dy)| {
+        let (nx, ny) = (x + dx, y + dy);
+        SandGrid::in_bounds(nx, ny) && !grid.is_air(nx, ny)
+    })
 }
 
 /// Somewhere an ant can actually stand: open, against sand, and not off up into the
 /// empty top of the tank.
-fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2) -> bool {
+fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2, from_y: f32) -> bool {
     if !is_free(grid, pos) || !touching_sand(grid, pos) {
         return false;
     }
@@ -500,7 +515,13 @@ fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2) -> bool {
     let x = x.clamp(0, GRID_W as isize - 1) as usize;
     let ceiling =
         (nav.surface_at(x) as f32 + SURFACE_ROAM).min(INITIAL_SURFACE as f32 + MOUND_HEADROOM);
-    pos.y <= ceiling
+
+    // Coming *down* is always allowed, whatever the ceiling says, and that second clause is
+    // load-bearing. The ceiling is a limit on how high an ant will climb; read as a limit on
+    // where it may be, it strands anything already above it — an ant on top of a spoil mound
+    // that has grown past the cap has every target refused, including the ones that would
+    // get it out, so it stands on the summit forever. Which is exactly what it did.
+    pos.y <= ceiling || pos.y < from_y
 }
 
 pub fn update_ants(
@@ -517,6 +538,10 @@ pub fn update_ants(
     stats.falling = 0;
     stats.panicking = 0;
     stats.diggers = 0;
+    // Per tick, both of them, so they read as "how many right now" rather than a total that
+    // only ever grows.
+    stats.walled_in = 0;
+    stats.at_the_glass = 0;
 
     for (mut ant, is_queen) in &mut ants {
         ant.age_days += dt * colony_day_per_sec.days_per_second;
@@ -527,6 +552,9 @@ pub fn update_ants(
             cy.clamp(0, GRID_H as isize - 1) as usize,
         );
         let alarm = ph.get(Ph::Alarm, ux, uy);
+        if ant.pos.x < 1.5 || ant.pos.x > GRID_W as f32 - 1.5 {
+            stats.at_the_glass += 1;
+        }
 
         // --- buried ------------------------------------------------------
         // Sand fell on it. Design calls for stunned-and-digs-itself-out rather than
@@ -788,7 +816,8 @@ fn step(
         }
     }
 
-    if can_stand(grid, nav, target) {
+    let from_y = ant.pos.y;
+    if can_stand(grid, nav, target, from_y) {
         ant.pos = target;
         return;
     }
@@ -796,16 +825,21 @@ fn step(
     for turn in DEFLECTIONS {
         let h = Vec2::from_angle(ant.heading.to_angle() + turn);
         let t = ant.pos + h * distance;
-        if can_stand(grid, nav, t) {
+        if can_stand(grid, nav, t, from_y) {
             ant.heading = h;
             ant.pos = t;
             return;
         }
     }
 
-    // Boxed in. Turn around and try again next tick.
+    // Boxed in. Turn away and try again next tick — but not by exactly half a turn, which
+    // is what this did and is a trap: reversing an ant whose reverse is also blocked flips
+    // it back next tick, and it vibrates on the spot for ever. Landing somewhere *near* the
+    // reverse, by an amount that depends on where it is, means the same ant tries a
+    // different way out each tick until one works.
     stats.walled_in += 1;
-    ant.heading = -ant.heading;
+    let nudge = (hash01(ant.pos.x.abs() as u32, ant.pos.y.abs() as u32, 0x57AC7) - 0.5) * 1.6;
+    ant.heading = Vec2::from_angle(ant.heading.to_angle() + std::f32::consts::PI + nudge);
 }
 
 /// Put the grain down outside. The sand simulation takes it from here, which is how the

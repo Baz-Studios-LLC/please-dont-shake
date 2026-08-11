@@ -741,6 +741,11 @@ fn shoot_colony(
         stats.dug,
         if stats.dug > 0 { returned * 100 / stats.dug as i64 } else { 0 },
     );
+    // The two locomotion faults, measured rather than watched for. Both should read zero.
+    info!(
+        "    stuck now {} | at the glass {}",
+        stats.walled_in, stats.at_the_glass
+    );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",
         stats.dug,
