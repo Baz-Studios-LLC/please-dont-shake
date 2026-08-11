@@ -26,16 +26,10 @@ ink_dim       = { srgb = [0.520, 0.478, 0.430] }
 # The game's one loud colour, only ever used to mean "this is the thing" — the
 # lit rim on the radial wheel, and the edge of a button under the pointer.
 #
-# It comes out of the sand. The old value was srgb [0.792, 0.118, 0.106]: hue 1
-# degree, 76% saturation, a printing-ink red with no relative anywhere in the
-# farm, which is why it read as harsh over a screen full of warm sand.
-#
-# This is the rust stratum's hue exactly (20 degrees), lifted from that stratum's
-# 41% saturation to 58%. The lift is not a fudge: at the stratum's own chroma the
-# brightest rust grain in the tank is srgb [0.694, 0.426, 0.291], so a highlight
-# drawn in it would disappear into the band it was sitting on. Same family as the
-# sand, still legible against it.
-accent        = { srgb = [0.711, 0.363, 0.189] }
+# Firebrick, #B22222. Brett's pick. Hue 0, 68% saturation, 42% lightness: a
+# deeper, less saturated red than the #CA1E1B it replaces, which was a
+# printing-ink red and read as harsh over a screen full of warm sand.
+accent        = { srgb = [0.698, 0.133, 0.133] }
 
 card_border   = { srgb = [0.330, 0.268, 0.212], alpha = 0.620 }
 panel_border  = { srgb = [0.392, 0.312, 0.240], alpha = 0.480 }
