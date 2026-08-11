@@ -22,8 +22,10 @@ use ordo::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StockItem {
-    Worker,
-    Queen,
+    /// The whole founding colony in one go — a queen and ten workers, tipped in
+    /// together the way a real ant kit arrives. Placing eleven ants one at a time
+    /// is nobody's idea of stocking a farm.
+    AntKit,
     /// Arrives with foraging in M2b.
     Food,
     /// Arrives with the water simulation in M2b.
@@ -33,41 +35,36 @@ pub enum StockItem {
 impl StockItem {
     pub fn label(self) -> &'static str {
         match self {
-            StockItem::Worker => "Worker",
-            StockItem::Queen => "Queen",
+            StockItem::AntKit => "Ant Kit",
             StockItem::Food => "Food",
             StockItem::Water => "Water",
         }
     }
 }
 
-/// Menu wedges, in screen order: up, right, down, left.
-pub const WEDGES: [StockItem; 4] = [
-    StockItem::Worker,
-    StockItem::Queen,
-    StockItem::Food,
-    StockItem::Water,
-];
+/// Menu wedges. Ordo spaces them evenly by count, so three sit at the top and the
+/// lower two corners.
+pub const WEDGES: [StockItem; 3] = [StockItem::AntKit, StockItem::Food, StockItem::Water];
 
-/// What's left to place. A founding colony, which is what a real formicarium ships as:
-/// one queen and a handful of workers.
+/// How many workers ride along with the queen in one kit.
+pub const KIT_WORKERS: u32 = 10;
+
+/// What's left to place. One kit, which is what a real formicarium ships as.
 #[derive(Resource)]
 pub struct Stock {
-    pub workers: u32,
-    pub queens: u32,
+    pub kits: u32,
 }
 
 impl Default for Stock {
     fn default() -> Self {
-        Self { workers: 10, queens: 1 }
+        Self { kits: 1 }
     }
 }
 
 impl Stock {
     pub fn remaining(&self, item: StockItem) -> Option<u32> {
         match item {
-            StockItem::Worker => Some(self.workers),
-            StockItem::Queen => Some(self.queens),
+            StockItem::AntKit => Some(self.kits),
             // Not simulated yet, so deliberately not offered as a number.
             StockItem::Food | StockItem::Water => None,
         }
@@ -81,16 +78,14 @@ impl Stock {
     /// sand costs you nothing.
     pub fn give(&mut self, item: StockItem) {
         match item {
-            StockItem::Worker => self.workers += 1,
-            StockItem::Queen => self.queens += 1,
+            StockItem::AntKit => self.kits += 1,
             StockItem::Food | StockItem::Water => {}
         }
     }
 
     fn take(&mut self, item: StockItem) {
         match item {
-            StockItem::Worker => self.workers = self.workers.saturating_sub(1),
-            StockItem::Queen => self.queens = self.queens.saturating_sub(1),
+            StockItem::AntKit => self.kits = self.kits.saturating_sub(1),
             StockItem::Food | StockItem::Water => {}
         }
     }
@@ -157,11 +152,12 @@ pub fn sync_radial_ui(
             }
         }
         (true, None) => {
+            // Just `radial(..)` — it already carries the `Radial` component, and adding
+            // a second one to seed the selection put two of the same component in one
+            // bundle, which Bevy panics on outright. Nothing is lost: a menu always
+            // opens with nothing selected, because the hand starts in the dead zone.
             let hub = commands
-                .spawn((OpenMenu, radial(menu.origin, WEDGES.len()), Radial {
-                    count: WEDGES.len(),
-                    selected: menu.selected,
-                }))
+                .spawn((OpenMenu, radial(menu.origin, WEDGES.len())))
                 .id();
 
             for (i, item) in WEDGES.iter().enumerate() {

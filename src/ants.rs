@@ -20,7 +20,7 @@
 
 use crate::grid::*;
 use crate::pheromones::*;
-use crate::radial::{PlacementQueue, Stock, StockItem};
+use crate::radial::{KIT_WORKERS, PlacementQueue, Stock, StockItem};
 use crate::tank::TankRoot;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -71,6 +71,21 @@ const SPOIL_SLUMP_RADIUS: f32 = 4.0;
 /// so tapping alarms the colony while shaking physically throws it around.
 const DISLODGE_AGITATION: f32 = 0.45;
 const DISLODGE_SECONDS: f32 = 0.9;
+
+/// Seconds of falling given to a freshly placed ant, so it drops to the sand instead
+/// of hanging in the air where the pointer left it. Generous: it is cancelled the
+/// moment the ant lands, so this is only ever an upper bound on the fall.
+const AIRBORNE_ON_PLACEMENT: f32 = 6.0;
+
+/// How far a grain must be carried from where it was dug before it can be put down.
+///
+/// Without this the colony digs and refills the same hole forever. On flat sand the
+/// working face *is* a valid dump site — an ant standing on the surface bites downward,
+/// is immediately "outside" again, and drops the grain back where it came from. 845
+/// excavations produced a farm with no visible tunnel in it. Carrying spoil clear of the
+/// face is what real ants do, and it is the whole difference between digging and
+/// shuffling.
+const MIN_HAUL_DISTANCE: f32 = 10.0;
 
 /// Seconds an ant will carry a grain before giving up and putting it down wherever it
 /// happens to be. The backstop against the colony deadlocking itself in.
@@ -129,6 +144,9 @@ pub struct Ant {
     pub dig_cooldown: f32,
     /// How long this ant has been carrying its current grain.
     pub haul_time: f32,
+    /// Where the grain it is carrying came from. Spoil has to be taken *away* from the
+    /// working face, not put back down beside it.
+    pub dug_at: Vec2,
     /// Seconds left of having been shaken off the glass. While this is running the ant
     /// is falling rather than walking.
     pub dislodged: f32,
@@ -316,37 +334,6 @@ pub fn setup_ant_assets(
 // Founding
 // ---------------------------------------------------------------------------
 
-/// Seed the farm the way a real one starts: a founding queen sealed into a small
-/// chamber with a shaft to the surface. Everything past this the colony digs itself.
-pub fn found_colony(mut grid: ResMut<SandGrid>) {
-    let surface = INITIAL_SURFACE as isize;
-    let entrance_x = GRID_W as isize / 2;
-    let chamber_y = surface - 22;
-
-    // Entrance shaft.
-    for y in chamber_y..=surface {
-        for dx in -2..=2 {
-            let x = entrance_x + dx;
-            if SandGrid::in_bounds(x, y) && (dx.abs() < 2 || y % 3 != 0) {
-                grid.set(x as usize, y as usize, Cell::AIR);
-            }
-        }
-    }
-    // Founding chamber.
-    for y in (chamber_y - 6)..=(chamber_y + 2) {
-        for x in (entrance_x - 9)..=(entrance_x + 9) {
-            let dx = (x - entrance_x) as f32 / 9.0;
-            let dy = (y - (chamber_y - 2)) as f32 / 4.5;
-            if dx * dx + dy * dy <= 1.0 && SandGrid::in_bounds(x, y) {
-                grid.set(x as usize, y as usize, Cell::AIR);
-            }
-        }
-    }
-
-    // Deliberately no ants. The founding chamber is dug and empty, and the queen and her
-    // ten workers sit in your stock waiting to be placed — stocking the farm is the
-    // player's first act, not something that has already happened to them.
-}
 
 /// Ant bodies, shared by founding and by player placement.
 fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f32, seed: u32) -> impl Bundle {
@@ -359,7 +346,11 @@ fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f32, seed: u32) -> imp
             carrying: None,
             dig_cooldown: hash01(seed, 19, 0xE81) * DIG_INTERVAL,
             haul_time: 0.0,
-            dislodged: 0.0,
+            dug_at: Vec2::ZERO,
+            // Airborne until it lands. An ant grips a surface it has actually reached,
+            // and one that has just been dropped in hasn't reached anything — without
+            // this it hangs wherever the pointer left it.
+            dislodged: AIRBORNE_ON_PLACEMENT,
             // A little depth variation between individuals, purely for parallax.
             z: SLAB_DEPTH * 0.5 - 0.012 - hash01(seed, 23, 0xF97) * 0.055,
         },
@@ -380,7 +371,8 @@ fn queen_bundle(assets: &AntAssets, pos: Vec2) -> impl Bundle {
             carrying: None,
             dig_cooldown: 0.0,
             haul_time: 0.0,
-            dislodged: 0.0,
+            dug_at: Vec2::ZERO,
+            dislodged: AIRBORNE_ON_PLACEMENT,
             z: SLAB_DEPTH * 0.5 - 0.05,
         },
         Mesh3d(assets.worker_mesh.clone()),
@@ -418,14 +410,22 @@ pub fn place_queued(
         let seed = *placed;
 
         match item {
-            StockItem::Queen => {
+            StockItem::AntKit => {
+                // Tipped in together, clustered around the spot and scattered a little,
+                // the way a tube of ants actually goes into a farm.
                 commands.spawn((queen_bundle(&assets, pos), ChildOf(tank)));
-            }
-            StockItem::Worker => {
-                // Spread ages so labour divides itself immediately: some nurses, some
-                // diggers, some at the surface. Real founding demography is M3.
-                let age = 2.0 + hash01(seed, 17, 0xD73) * 28.0;
-                commands.spawn((worker_bundle(&assets, pos, age, seed), ChildOf(tank)));
+                for i in 0..KIT_WORKERS {
+                    let s = seed * 31 + i;
+                    let scatter = Vec2::new(
+                        (hash01(s, 7, 0xA47) - 0.5) * 12.0,
+                        (hash01(s, 11, 0xB53) - 0.5) * 4.0,
+                    );
+                    let at = nearest_free(&grid, pos + scatter).unwrap_or(pos);
+                    // Spread ages so labour divides itself immediately: some nurses,
+                    // some diggers, some at the surface. Real demography is M3.
+                    let age = 2.0 + hash01(s, 17, 0xD73) * 28.0;
+                    commands.spawn((worker_bundle(&assets, at, age, s), ChildOf(tank)));
+                }
             }
             // Not simulated yet — the wedges are dimmed, so this shouldn't be reachable.
             StockItem::Food | StockItem::Water => stock.give(item),
@@ -468,19 +468,28 @@ fn is_free(grid: &SandGrid, pos: Vec2) -> bool {
     grid.is_air(x, y)
 }
 
-/// Ants grip the glass, so open space inside the nest is walkable.
+/// Is there sand within reach to hold on to?
 ///
-/// Requiring a solid neighbour instead — which is what this did first — turns every
-/// chamber into a pit. Ants fall to the floor, can't cross the middle, and a laden one
-/// has to random-walk the whole wall to find the shaft; digging collapsed to a tenth of
-/// its rate because every digger was permanently stuck hauling. And it was wrong anyway:
-/// in a real formicarium ants walk on the pane straight across an open chamber. What
-/// knocks one off isn't open space, it's being shaken — see `dislodged`.
+/// Ants walk on the sand — any face of it, floor, wall or the roof of a tunnel — and
+/// not on the glass. So a position with no solid neighbour is thin air, and an ant
+/// there falls.
 ///
-/// The one thing adhesion mustn't allow is wandering off into the empty top of the tank,
-/// so roaming is capped just above the terrain.
+/// This did briefly allow glass-walking, because a hand-carved 18-cell-wide test
+/// chamber turned into a pit that laden ants couldn't cross and digging stalled. That
+/// chamber doesn't exist any more: the colony digs its own nest now, and self-dug
+/// tunnels are a couple of cells wide, so every point in one is against sand anyway.
+/// The pit was an artifact of the fixture, not of the rule.
+fn touching_sand(grid: &SandGrid, pos: Vec2) -> bool {
+    let (x, y) = cell_of(pos);
+    NEIGHBOURS_8
+        .iter()
+        .any(|(dx, dy)| !grid.is_air(x + dx, y + dy))
+}
+
+/// Somewhere an ant can actually stand: open, against sand, and not off up into the
+/// empty top of the tank.
 fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2) -> bool {
-    if !is_free(grid, pos) {
+    if !is_free(grid, pos) || !touching_sand(grid, pos) {
         return false;
     }
     let (x, _) = cell_of(pos);
@@ -524,14 +533,15 @@ pub fn update_ants(
             continue;
         }
 
-        // --- shaken off ---------------------------------------------------
-        // A hard shake breaks an ant's grip and it drops. This is the only thing that
-        // makes ants fall, which is why it reads as *being shaken* rather than as a
-        // physics quirk.
+        // --- falling ------------------------------------------------------
+        // Two ways to be in the air: shaken off a surface, or simply not touching one —
+        // which covers an ant that was just dropped into the tank by the player and has
+        // nothing to grip yet. One rule handles placement gravity, shake-throwing and
+        // the refusal to walk on glass.
         if grid.agitation_at(ux, uy) > DISLODGE_AGITATION {
             ant.dislodged = DISLODGE_SECONDS;
         }
-        if ant.dislodged > 0.0 {
+        if ant.dislodged > 0.0 || !touching_sand(&grid, ant.pos) {
             stats.falling += 1;
             ant.dislodged -= dt;
             ant.vel.y -= GRAVITY * dt;
@@ -572,7 +582,8 @@ pub fn update_ants(
         if ant.carrying.is_some() {
             ant.haul_time += dt;
 
-            if nav.is_dump_site(ux, uy) {
+            let carried_far_enough = ant.pos.distance(ant.dug_at) >= MIN_HAUL_DISTANCE;
+            if carried_far_enough && nav.is_dump_site(ux, uy) {
                 if drop_spoil(&mut ant, &mut grid, ux, uy) {
                     stats.dropped_outside += 1;
                 } else {
@@ -595,15 +606,21 @@ pub fn update_ants(
             }
         }
 
-        // Digging only happens underground.
+        // Above ground a digger may only bite *downward*.
         //
-        // Without that restriction an ant that has just put its grain down is standing
-        // on the surface, unladen, and free to dig again — so it bites the topsoil at its
-        // feet, carries it one cell, and puts it back. Worse, the Dig pheromone it leaves
-        // draws *other* diggers up to join in. The colony ends up churning the front lawn
-        // in a self-reinforcing loop while the nest below never grows.
+        // Banning it outright was wrong in both directions. Allowed freely, an ant that
+        // has just put its grain down stands on the surface, unladen, and bites the
+        // topsoil at its feet, carries it one cell and puts it back — and the Dig
+        // pheromone it leaves draws others up to join in, so the colony churns the front
+        // lawn in a self-reinforcing loop while the nest never grows. Banned outright, and
+        // a colony tipped onto flat sand can never get underground at all, because the
+        // only way down is to dig: the farm stayed pristine and every counter read zero.
+        //
+        // Downward-only threads between the two. A shaft can be started from the surface;
+        // the lawn cannot be shuffled sideways.
+        let digs_downward = !above_ground || ant.heading.y < -0.3;
         let ready_to_dig =
-            ant.carrying.is_none() && job == Job::Digger && !panicking && !above_ground;
+            ant.carrying.is_none() && job == Job::Digger && !panicking && digs_downward;
         if ready_to_dig {
             ant.dig_cooldown -= dt;
         }
@@ -740,6 +757,7 @@ fn step(
             let cell = grid.take(tx as usize, ty as usize);
             ant.carrying = Some(cell.shade);
             ant.haul_time = 0.0;
+            ant.dug_at = ant.pos;
             ant.dig_cooldown = DIG_INTERVAL;
             stats.dug += 1;
             // Work attracts work: this is the deposit the whole nest shape grows from.

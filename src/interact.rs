@@ -5,11 +5,13 @@
 //! mode, no button, no menu — just a continuous slope between the harmless thing and
 //! the forbidden one. The game asks you not to shake. It says nothing about tapping.
 //!
-//! Right-drag is the M1 debug brush: carve tunnels by hand so we can watch whether
-//! they hold when calm and collapse when shaken. The ants take this job in M2.
+//! Right-drag pours sand in from the top of the tank, as grains, for as long as you hold
+//! it — stocking the farm with substrate. Shift+right-drag carves it away again, which is
+//! now only a debug tool: the ants dig for themselves.
 
 use crate::grid::*;
 use crate::pheromones::{Ph, Pheromones};
+use crate::sand::{GrainSpawn, GrainSpawnQueue};
 use crate::radial::WEDGES;
 use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection};
 use crate::tank::{CAM_DIST, TankRoot, TankSpring};
@@ -49,6 +51,11 @@ const SHAKE_AGITATION_MAX_RATE: f32 = 3.6;
 const TILT_FROM_DRAG: f32 = 2.2;
 
 const DIG_RADIUS_CELLS: f32 = 4.5;
+/// Grains dropped per frame while pouring, how wide the stream spreads, and a cap so a
+/// long hold cannot outrun the particle budget.
+const POUR_PER_FRAME: u32 = 3;
+const POUR_SPREAD: f32 = 5.0;
+const POUR_QUEUE_CAP: usize = 64;
 
 /// How long the button must be held still before the radial menu opens. Short enough not
 /// to feel like a wait, long enough that an ordinary tap never triggers it.
@@ -105,6 +112,7 @@ pub fn pointer_input(
     mut stock: ResMut<Stock>,
     mut placements: ResMut<PlacementQueue>,
     theme: Res<Theme>,
+    mut grains: ResMut<GrainSpawnQueue>,
 ) {
     let (camera, cam_tf) = *camera;
     let tank_tf = *tank;
@@ -117,12 +125,16 @@ pub fn pointer_input(
 
     let px_to_world = visible_height() / window.height().max(1.0);
 
-    // ---- right button: debug dig brush -------------------------------------
+    // ---- right button: pour sand, or dig with shift ------------------------
     if mouse.pressed(MouseButton::Right)
         && let Some(local) = cursor_to_tank_local(camera, cam_tf, tank_tf, cursor)
     {
-        let adding = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        brush(&mut grid, cell_of(local), adding);
+        let cell = cell_of(local);
+        if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+            dig(&mut grid, cell);
+        } else {
+            pour(&mut grains, cell);
+        }
     }
 
     // ---- left button: tap, shake, and the radial menu ----------------------
@@ -223,30 +235,56 @@ pub fn tap(grid: &mut SandGrid, ph: &mut Pheromones, spring: &mut TankSpring, ce
     spring.tilt_vel -= off_centre * 1.6;
 }
 
-/// M1 debug brush. `adding` refills with sand of the stratum that belongs at that
-/// height, so hand-carved test tunnels stay consistent with the layering.
-fn brush(grid: &mut SandGrid, cell: Vec2, adding: bool) {
+/// Pour sand in from the top of the tank, as grains, for as long as the button is held.
+///
+/// Writing a disc of cells straight into the grid instead gives you a clump that hangs
+/// in mid-air: every interior cell has neighbours all round, so it scores high on
+/// stability and the cohesion model is perfectly content to hold it up. Sand poured into
+/// a real farm falls from the top and finds its own angle, so this drops actual grains
+/// and lets the existing particle physics do the rest — they land, settle, and become
+/// part of the sand.
+fn pour(grains: &mut GrainSpawnQueue, cell: Vec2) {
+    let x = cell.x.round().clamp(0.0, GRID_W as f32 - 1.0) as usize;
+
+    for i in 0..POUR_PER_FRAME {
+        if grains.0.len() >= POUR_QUEUE_CAP {
+            return;
+        }
+        // A little spread across the stream and a little downward push, so it reads as
+        // a pour rather than a column of identical drops.
+        let seed = (x as u32).wrapping_mul(31).wrapping_add(i);
+        let jitter = hash01(seed, 3, 0x9E1B_C0DE) - 0.5;
+        let sx = (x as f32 + jitter * POUR_SPREAD)
+            .clamp(0.0, GRID_W as f32 - 1.0) as usize;
+
+        grains.0.push(GrainSpawn {
+            x: sx,
+            y: GRID_H - 1,
+            shade: shade_for(sx, INITIAL_SURFACE),
+            vel: Vec2::new(jitter * 0.6, -2.0).extend(0.0),
+        });
+    }
+}
+
+/// Debug: carve sand away by hand. The ants do this for themselves now, so this is only
+/// for setting up a shape to test the sand against.
+fn dig(grid: &mut SandGrid, cell: Vec2) {
     let r = DIG_RADIUS_CELLS;
+    if cell.x < -r || cell.y < -r || cell.x > GRID_W as f32 + r || cell.y > GRID_H as f32 + r {
+        return;
+    }
+
     let min_x = ((cell.x - r).floor().max(0.0)) as usize;
     let max_x = ((cell.x + r).ceil().min(GRID_W as f32 - 1.0)).max(0.0) as usize;
     let min_y = ((cell.y - r).floor().max(0.0)) as usize;
     let max_y = ((cell.y + r).ceil().min(GRID_H as f32 - 1.0)).max(0.0) as usize;
 
-    if cell.x < -r || cell.y < -r || cell.x > GRID_W as f32 + r || cell.y > GRID_H as f32 + r {
-        return;
-    }
-
     for y in min_y..=max_y {
         for x in min_x..=max_x {
-            let d = Vec2::new(x as f32 + 0.5, y as f32 + 0.5).distance(cell);
-            if d > r {
+            if Vec2::new(x as f32 + 0.5, y as f32 + 0.5).distance(cell) > r {
                 continue;
             }
-            if adding {
-                if grid.get(x, y).mat == Substance::Air {
-                    grid.set(x, y, Cell { mat: Substance::Sand, shade: shade_for(x, y) });
-                }
-            } else if grid.get(x, y).mat == Substance::Sand {
+            if grid.get(x, y).mat == Substance::Sand {
                 grid.set(x, y, Cell::AIR);
             }
         }

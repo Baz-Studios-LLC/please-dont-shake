@@ -25,6 +25,7 @@ mod grid;
 mod interact;
 mod meshing;
 mod pheromones;
+mod pause;
 mod radial;
 mod sand;
 mod tank;
@@ -36,7 +37,7 @@ use audio::setup_music;
 
 use title::GameState;
 
-use ants::{ColonyClock, found_colony, setup_ant_assets, sync_ant_transforms, update_ants};
+use ants::{ColonyClock, setup_ant_assets, sync_ant_transforms, update_ants};
 use grains::{setup_grain_assets, spawn_queued_grains, update_grains};
 use grid::{SandGrid, SandPalette, fill_strata};
 use interact::{PointerState, pointer_input};
@@ -114,15 +115,10 @@ fn main() {
         .init_resource::<radial::RadialMenu>()
         .init_resource::<radial::Stock>()
         .init_resource::<radial::PlacementQueue>()
+        .init_resource::<pause::PauseMenu>()
         .add_systems(
             Startup,
             (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
-        )
-        // The colony only exists once you've pressed Begin — which is also what makes the
-        // title screen an empty farm rather than a picture of one.
-        .add_systems(
-            OnEnter(GameState::Playing),
-            found_colony.run_if(devcapture::colony_enabled),
         )
         .add_plugins(ordo::OrdoPlugin::with_theme("theme.ordo.toml"))
         .add_systems(
@@ -130,6 +126,8 @@ fn main() {
             (title::enter_title, title::dress_menu).chain(),
         )
         .add_systems(OnExit(GameState::Title), title::exit_title)
+        // Leaving play tears the Esc menu down with it.
+        .add_systems(OnExit(GameState::Playing), pause::close_on_leave)
         .add_systems(
             FixedUpdate,
             (
@@ -158,6 +156,15 @@ fn main() {
                 .chain(),
         )
         .add_observer(title::on_menu_activate)
+        .add_observer(pause::on_pause_activate)
+        // The farm keeps running behind the Esc menu on purpose — an ambient game whose
+        // colony froze whenever you opened a menu would be lying about what it is.
+        .add_systems(
+            Update,
+            (pause::toggle_pause, pause::sync_pause_ui, pause::dress_pause_menu)
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+        )
         .add_systems(Update, devcapture::screenshot_hotkey);
 
     // State registration has to come *after* DefaultPlugins, which is what brings

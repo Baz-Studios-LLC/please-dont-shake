@@ -54,6 +54,7 @@ pub fn capture_mode() -> bool {
 
 /// `--sand-only` reruns the original M1 test with no colony in the tank, so the sand
 /// numbers stay comparable to the ones recorded in DESIGN.md.
+#[allow(dead_code)]
 pub fn sand_only() -> bool {
     std::env::args().any(|a| a == "--sand-only")
 }
@@ -239,6 +240,14 @@ const C_SHOTS: [(f32, &str); 4] = [
     (60.0, "03-digging-60s"),
     (100.0, "04-nest-100s"),
 ];
+/// Stock the farm before anything else — nothing is in the tank until it is placed.
+const C_STOCK: f32 = 0.2;
+
+/// Radial menu: open it, aim at a wedge, release. Guards against the spawn panic.
+const C_MENU_OPEN: f32 = 30.0;
+const C_MENU_PICK: f32 = 31.0;
+const C_MENU_CLOSE: f32 = 32.0;
+
 const C_TAP: f32 = 103.0;
 const C_SHOT_TAP: f32 = 107.0;
 const C_SHAKE: (f32, f32) = (110.0, 112.5);
@@ -257,6 +266,9 @@ pub fn run_colony_capture(
     grains: Query<(), With<crate::grains::Grain>>,
     ants: Query<&crate::ants::Ant>,
     stats: Res<crate::ants::ColonyStats>,
+    mut menu: ResMut<crate::radial::RadialMenu>,
+    mut stock: ResMut<crate::radial::Stock>,
+    mut placements: ResMut<crate::radial::PlacementQueue>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let target = &target.0;
@@ -268,6 +280,17 @@ pub fn run_colony_capture(
     cap.t += time.delta_secs();
     let t = cap.t;
     let crossed = |mark: f32| prev < mark && t >= mark;
+
+    // Stock the farm, the way a player would.
+    //
+    // Nothing is in the tank until someone places it — so without this the whole colony
+    // run measured an empty box, and said so: "0 ants". One kit, dropped on the surface,
+    // exactly as the radial menu would place it.
+    if crossed(C_STOCK) {
+        let drop_at = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
+        placements.0.push((crate::radial::StockItem::AntKit, drop_at));
+        info!("tipped in the ant kit");
+    }
 
     // Baseline once the founding chamber exists but before the ants have done anything.
     if crossed(0.3) {
@@ -286,6 +309,27 @@ pub fn run_colony_capture(
                 &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, target, name,
             );
         }
+    }
+
+    // Open the radial menu, point it at a wedge, and place something.
+    //
+    // The offscreen target can't show UI, so this proves nothing about how the menu
+    // *looks* — it exists because spawning it used to panic and nothing here would
+    // have caught that. Two of the three bugs found in this UI were found by hand.
+    if crossed(C_MENU_OPEN) {
+        menu.open = true;
+        menu.origin = Vec2::new(640.0, 400.0);
+        menu.cell = Vec2::new(GRID_W as f32 * 0.5, INITIAL_SURFACE as f32 - 10.0);
+        info!("opened the radial menu");
+    }
+    if crossed(C_MENU_PICK) {
+        menu.selected = Some(0);
+    }
+    if crossed(C_MENU_CLOSE) {
+        let placed = crate::radial::commit_selection(&menu, &mut stock, &mut placements);
+        menu.open = false;
+        menu.selected = None;
+        info!("closed the radial menu, placed {placed:?}");
     }
 
     if crossed(C_TAP) {
