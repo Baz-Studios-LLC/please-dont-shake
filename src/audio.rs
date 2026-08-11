@@ -13,7 +13,7 @@ pub struct BackgroundMusic;
 pub fn setup_music(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         BackgroundMusic,
-        AudioPlayer::new(asset_server.load("music/cozy_piano.wav")),
+        AudioPlayer::new(asset_server.load("music/cozy_piano.ogg")),
         PlaybackSettings::LOOP.with_volume(Volume::Linear(0.65)),
     ));
 }
