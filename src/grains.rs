@@ -17,11 +17,6 @@ const Z_BOUNCE: f32 = 0.35;
 const WALL_BOUNCE: f32 = 0.4;
 const MAX_LIFE: f32 = 6.0;
 
-/// Local agitation applied where a grain lands, so a pile finds its angle of repose
-/// instead of stacking into columns. Loose sand, not packed strata.
-const SETTLE_SLUMP: f32 = 0.55;
-const SETTLE_SLUMP_RADIUS: f32 = 4.0;
-
 #[derive(Component)]
 pub struct Grain {
     pub vel: Vec3,
@@ -152,15 +147,10 @@ pub fn update_grains(
 /// on every shake would slowly empty the tank. So if the whole column is packed, fan
 /// outwards until somewhere takes it.
 fn settle(grid: &mut SandGrid, cx: isize, cy: isize, shade: u8) {
+    // Loose, so it rolls off whatever it landed on and the stream heaps into a cone
+    // rather than a spire. It packs the moment it runs out of downhill.
     let place = |grid: &mut SandGrid, x: isize, y: isize| {
-        grid.set(x as usize, y as usize, Cell { mat: Substance::Sand, shade });
-        // Nudge what just landed so it finds its angle of repose.
-        //
-        // Our cohesion model is happy to hold a one-cell-wide column — a grain with
-        // something under it scores 3 against a threshold of 1.2 — so a stream of
-        // grains landing on the same spot builds a spire instead of a cone. Poured
-        // sand is loose, not packed, and this is what makes a pile behave like a pile.
-        grid.agitate(x as f32, y as f32, SETTLE_SLUMP_RADIUS, SETTLE_SLUMP);
+        grid.set_loose(x as usize, y as usize, Cell { mat: Substance::Sand, shade });
     };
 
     for y in cy.max(0)..GRID_H as isize {

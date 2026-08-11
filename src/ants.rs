@@ -62,11 +62,6 @@ const SURFACE_ROAM: f32 = 3.0;
 /// spoil. The colony builds a tower into the void instead of a mound.
 const MOUND_HEADROOM: f32 = 12.0;
 
-/// Local agitation applied where an ant puts a grain down, so loose spoil slumps instead
-/// of stacking vertically.
-const SPOIL_SLUMP: f32 = 0.42;
-const SPOIL_SLUMP_RADIUS: f32 = 4.0;
-
 /// Sand agitation that shakes an ant off its footing. Above a tap, below a real shake —
 /// so tapping alarms the colony while shaking physically throws it around.
 const DISLODGE_AGITATION: f32 = 0.45;
@@ -646,8 +641,16 @@ fn desired_heading(
 
     if ant.carrying.is_some() {
         if above_ground {
-            // Out with a load: walk the surface until there's ground to drop it on.
-            want += lateral(ant) * 2.0 + follow_terrain(ant, nav, ux) * 1.2 + jitter * 0.3;
+            // Out with a load: walk away from the hole until there's ground to drop it on.
+            //
+            // Heading away rather than simply onward is what keeps the spoil apron
+            // spreading outward. Committed to its own direction, an ant that surfaced
+            // facing the nest walks back over the mouth and dumps on the near side, and
+            // since spoil is loose it slumps in. The apron then never gets past the
+            // clearance and every extra grain leaks back down the shaft.
+            want += outbound(ant, nav, ux) * 2.0
+                + follow_terrain(ant, nav, ux) * 1.2
+                + jitter * 0.3;
         } else if let Some(out) = nav.descend(ux, uy) {
             want += out * W_HOMEWARD;
             want += jitter * (W_JITTER * 0.4);
@@ -691,6 +694,16 @@ fn desired_heading(
 #[inline]
 fn lateral(ant: &Ant) -> Vec2 {
     if ant.heading.x >= 0.0 { Vec2::X } else { Vec2::NEG_X }
+}
+
+/// Away from the nest entrance, for an ant with a grain to get rid of. Standing directly
+/// over the mouth there's no away, so it keeps the direction it already had.
+#[inline]
+fn outbound(ant: &Ant, nav: &NavField, ux: usize) -> Vec2 {
+    match nav.away_from_mouth(ux) {
+        Some(dir) => Vec2::new(dir, 0.0),
+        None => lateral(ant),
+    }
 }
 
 /// Pull toward walking *on* the terrain — upward as readily as downward.
@@ -783,16 +796,10 @@ fn drop_spoil(ant: &mut Ant, grid: &mut SandGrid, ux: usize, uy: usize) -> bool 
     if grid.get(ux, uy).mat != Substance::Air {
         return false;
     }
-    grid.set(ux, uy, Cell { mat: Substance::Sand, shade });
-
-    // Nudge the spoil so it finds its angle of repose.
-    //
-    // Our cohesion model holds any grain with something under it, which means a
-    // freshly-dropped pile is free to become a one-cell-wide chimney — and it did: the
-    // colony built a spindly tower out of the entrance and climbed it. Loose spoil isn't
-    // packed sand, so a small local agitation lets it slump into a cone the way tipped
-    // sand actually behaves.
-    grid.agitate(ux as f32, uy as f32, SPOIL_SLUMP_RADIUS, SPOIL_SLUMP);
+    // Loose, because tipped-out spoil is the loosest sand in the farm. It rolls to the
+    // angle of repose and the mound comes out as a cone; left packed, a stream of drops
+    // on one spot builds a chimney and the colony climbs it, which is what it used to do.
+    grid.set_loose(ux, uy, Cell { mat: Substance::Sand, shade });
 
     ant.carrying = None;
     ant.haul_time = 0.0;
@@ -837,7 +844,11 @@ fn escape_burial(
                 for dx in -r..=r {
                     let (nx, ny) = (ux as isize + dx, uy as isize + dy);
                     if SandGrid::in_bounds(nx, ny) && grid.is_air(nx, ny) {
-                        grid.set(nx as usize, ny as usize, Cell { mat: Substance::Sand, shade });
+                        grid.set_loose(
+                            nx as usize,
+                            ny as usize,
+                            Cell { mat: Substance::Sand, shade },
+                        );
                         ant.carrying = None;
                         stats.dropped_while_buried += 1;
                         placed = true;

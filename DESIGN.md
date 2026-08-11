@@ -108,6 +108,29 @@ they've packed, exactly as real sand does. Ceilings shed a *fraction* of their g
 as agitation climbs and the survivors settle into an arch. This is what makes the
 gradient from tap to shake continuous rather than binary.
 
+#### Loose and packed: two states, not one threshold
+
+Cohesion alone cannot also produce an angle of repose, and the attempt to make it do
+both wasted real time. The top grain of a one-cell spire scores 3 (something directly
+beneath it) while a tunnel ceiling hanging by its sides scores 2 — so *any* threshold
+low enough to keep ceilings up is also happy to hold a spire. Poured sand and ant spoil
+built spindly towers, and the colony climbed its own chimney.
+
+They aren't the same physics, so the model says so. Every grain is **loose** or
+**packed**:
+
+- **Loose** — poured, tipped out by an ant, or just knocked off a wall by a shake. No
+  cohesion whatsoever. It falls, and failing that rolls diagonally off whatever it's on,
+  until neither diagonal is open. That condition *is* a slope of 45°, so heaps come out
+  as cones with no angle-of-repose rule written anywhere. The instant it runs out of
+  moves it packs.
+- **Packed** — the strata the tank was filled with, and anything that has come to rest.
+  The cohesion model above, unchanged. Tunnels persist; a settled spoil mound can be
+  dug through like any other sand.
+
+A grain that moves becomes loose again, which is why a shake liquefies the surface and
+leaves it at repose rather than in the shape it was.
+
 Determinism matters (the farm has to serialize across days), so randomness is a cheap
 positional hash of `(x, y, tick)` rather than an RNG. The scan runs bottom-row-first so
 each cell moves at most one step per tick, with the x-direction alternating per tick to

@@ -95,6 +95,19 @@ pub struct SandGrid {
     pub next_awake: Vec<bool>,
     /// Per cell scratch, so a grain can't be stepped twice in one tick.
     moved: Vec<bool>,
+    /// Per cell. Set on a grain that has moved and not yet come to rest.
+    ///
+    /// Loose sand has **no cohesion at all**; packed sand has all of it. That single bit
+    /// is the difference between poured sand, which has to find its angle of repose, and
+    /// packed strata, which have to hold a tunnel open for days.
+    ///
+    /// One stability threshold cannot serve both, and trying cost a lot of time. The top
+    /// grain of a one-cell-wide spire scores 3 — something directly beneath it — while a
+    /// tunnel ceiling hanging by its two sides scores 2. Any threshold low enough to keep
+    /// ceilings up is also happy to hold a spire, so no amount of tuning gets cones out
+    /// of a pour. The two cases aren't the same physics: one is loose sand, the other is
+    /// compacted. So the model says so.
+    loose: Vec<bool>,
     pub tick: u32,
     /// Bumped whenever any cell changes. Lets the navigation flood skip rebuilding for
     /// a farm that hasn't moved, which is most of the time.
@@ -110,6 +123,7 @@ impl SandGrid {
             awake: vec![true; N_CHUNKS],
             next_awake: vec![true; N_CHUNKS],
             moved: vec![false; GRID_W * GRID_H],
+            loose: vec![false; GRID_W * GRID_H],
             tick: 0,
             epoch: 0,
         }
@@ -171,15 +185,40 @@ impl SandGrid {
         self.agitation[chunk_index(x, y)]
     }
 
-    /// Write a cell without waking anything. Only for bulk fills.
+    /// Has this grain still to find its rest? Loose grains have no cohesion.
+    #[inline]
+    pub fn is_loose(&self, x: usize, y: usize) -> bool {
+        self.loose[Self::idx(x, y)]
+    }
+
+    /// This grain has come to rest. It gains cohesion and stops slumping — which is what
+    /// lets a spoil mound, once settled, be tunnelled through like any other sand.
+    #[inline]
+    pub fn pack(&mut self, x: usize, y: usize) {
+        self.loose[Self::idx(x, y)] = false;
+    }
+
+    /// Write a cell without waking anything. Only for bulk fills, which lay down packed
+    /// strata — sand that has been sitting in the tank, not sand that just arrived.
     #[inline]
     pub fn set_raw(&mut self, x: usize, y: usize, cell: Cell) {
         self.cells[Self::idx(x, y)] = cell;
+        self.loose[Self::idx(x, y)] = false;
     }
 
     /// Write a cell and wake the neighbourhood so the sim reacts to it.
     pub fn set(&mut self, x: usize, y: usize, cell: Cell) {
         self.cells[Self::idx(x, y)] = cell;
+        self.loose[Self::idx(x, y)] = false;
+        self.touch(x, y);
+    }
+
+    /// Write a grain that hasn't settled yet — poured sand, ant spoil, a grain dropping
+    /// out of the air. It arrives with no cohesion and slumps until it finds a rest, so
+    /// it heaps into a cone instead of standing wherever it happened to land.
+    pub fn set_loose(&mut self, x: usize, y: usize, cell: Cell) {
+        self.cells[Self::idx(x, y)] = cell;
+        self.loose[Self::idx(x, y)] = true;
         self.touch(x, y);
     }
 
@@ -241,10 +280,16 @@ impl SandGrid {
 
     /// Move a grain, leaving air behind. Marks the destination so it can't step again
     /// this tick, and wakes both neighbourhoods.
+    ///
+    /// Anything that moves lands loose, whatever it was before. A grain the shake just
+    /// knocked off a wall is no longer part of a packed mass — it's tumbling — so it
+    /// keeps tumbling until it finds somewhere to sit.
     pub fn move_cell(&mut self, x: usize, y: usize, nx: usize, ny: usize) {
         let cell = self.get(x, y);
         self.cells[Self::idx(x, y)] = Cell::AIR;
         self.cells[Self::idx(nx, ny)] = cell;
+        self.loose[Self::idx(x, y)] = false;
+        self.loose[Self::idx(nx, ny)] = true;
         self.moved[Self::idx(nx, ny)] = true;
         self.touch(x, y);
         self.touch(nx, ny);
@@ -254,6 +299,7 @@ impl SandGrid {
     pub fn take(&mut self, x: usize, y: usize) -> Cell {
         let cell = self.get(x, y);
         self.cells[Self::idx(x, y)] = Cell::AIR;
+        self.loose[Self::idx(x, y)] = false;
         self.touch(x, y);
         cell
     }

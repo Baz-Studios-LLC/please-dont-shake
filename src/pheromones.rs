@@ -209,6 +209,21 @@ pub const UNREACHABLE: u16 = u16::MAX;
 /// wider than any tunnel the ants dig, or a shaft reads as open ground.
 const SURFACE_ENVELOPE: usize = 7;
 
+/// How far below the ground on *both* sides a column has to sit before it counts as a
+/// nest entrance.
+///
+/// Both sides is the whole trick. A column beside a spoil mound is also far below the
+/// neighbourhood maximum, and calling that an entrance would spread entrance status across
+/// the terrain until there was nowhere left to dump. A hole has high ground either side of
+/// it; the flank of a mound only has it on one.
+const MOUTH_DIP: u16 = 4;
+
+/// Columns of clearance a hauler keeps between the entrance and where it drops its grain.
+///
+/// Sets how tall the spoil apron can grow before it reaches the hole, since a heap at
+/// repose spreads about one column per cell of height.
+const MOUND_CLEARANCE: usize = 7;
+
 /// How far every air cell is from open sky, in steps through air, plus where the sand
 /// surface currently sits in each column.
 ///
@@ -233,6 +248,14 @@ pub struct NavField {
     pub surface: Vec<u16>,
     /// Per-column topmost solid cell, before the envelope filter.
     raw_surface: Vec<u16>,
+    /// Column of the nearest nest entrance, or `GRID_W` where there is none.
+    ///
+    /// Spoil has to be put down *clear of the hole it came out of*, and that needs an
+    /// actual answer to "where is the hole". Loose sand rolls downhill, and an open shaft
+    /// in flat ground is the lowest point for a long way — so a grain dropped on the lip
+    /// goes straight back down it. Measured: digging netted 32 of its first 33 cells and
+    /// only 87 of 231 by the time the mound had grown back to the mouth.
+    nearest_mouth: Vec<u32>,
     queue: VecDeque<u32>,
     /// The grid revision this was built from, so a settled farm rebuilds nothing.
     built_epoch: u64,
@@ -244,6 +267,7 @@ impl NavField {
             dist: vec![UNREACHABLE; GRID_W * GRID_H],
             surface: vec![0; GRID_W],
             raw_surface: vec![0; GRID_W],
+            nearest_mouth: vec![GRID_W as u32; GRID_W],
             queue: VecDeque::with_capacity(GRID_W * GRID_H / 4),
             built_epoch: u64::MAX,
         }
@@ -263,11 +287,40 @@ impl NavField {
         self.surface[x.min(GRID_W - 1)]
     }
 
+    /// How many columns from here to the nearest nest entrance. `GRID_W` if the farm has
+    /// no entrance at all, which is true of an untouched tank.
+    #[inline]
+    pub fn mouth_clearance(&self, x: usize) -> usize {
+        let x = x.min(GRID_W - 1);
+        let mouth = self.nearest_mouth[x];
+        if mouth >= GRID_W as u32 {
+            return GRID_W;
+        }
+        x.abs_diff(mouth as usize)
+    }
+
+    /// Which way is away from the nearest entrance, or `None` when standing on it or when
+    /// there isn't one. Haulers follow this so the spoil apron spreads outward instead of
+    /// heaping up against the hole and slumping back in.
+    #[inline]
+    pub fn away_from_mouth(&self, x: usize) -> Option<f32> {
+        let x = x.min(GRID_W - 1);
+        let mouth = self.nearest_mouth[x];
+        if mouth >= GRID_W as u32 {
+            return None;
+        }
+        match x.cmp(&(mouth as usize)) {
+            std::cmp::Ordering::Greater => Some(1.0),
+            std::cmp::Ordering::Less => Some(-1.0),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
     /// Somewhere a hauled grain can actually be put down: standing on the ground, in a
-    /// column whose ground is its own top surface rather than the roof of a tunnel.
+    /// column whose ground is its own top surface rather than the roof of a tunnel, and
+    /// far enough from the entrance that the grain stays where it's put.
     ///
-    /// This is deliberately judged from the single column and nothing else, and both
-    /// halves of it were learned the hard way.
+    /// All three parts were learned the hard way.
     ///
     /// Without the lower bound, an ant on the lip of the entrance shaft counts as
     /// outside — it does have open sky above it — but the grain it drops falls straight
@@ -277,11 +330,17 @@ impl NavField {
     /// apex column satisfies it, so every hauler funnels into one cell, jams, and digging
     /// stops dead. Asking each column about itself gives a whole surface to dump on, and
     /// still refuses the shaft.
+    ///
+    /// The clearance is what the loose-sand model made necessary. Spoil is loose, so it
+    /// rolls to its angle of repose — and a shaft in flat ground is the lowest point for
+    /// a long way, so anything dropped within rolling distance ends up down it. This is
+    /// also what real ants do: the spoil goes in a ring set back from the hole, which is
+    /// why a *Lasius* nest has a crater rather than a plug.
     #[inline]
     pub fn is_dump_site(&self, x: usize, y: usize) -> bool {
         let ground = self.raw_surface[x.min(GRID_W - 1)];
         let y = y as u16;
-        y > ground && y <= ground + 2
+        y > ground && y <= ground + 2 && self.mouth_clearance(x) >= MOUND_CLEARANCE
     }
 
     /// Downhill step toward open sky, or `None` at a dead end.
@@ -328,7 +387,7 @@ pub fn rebuild_nav_field(mut nav: ResMut<NavField>, grid: Res<SandGrid>) {
     }
     nav.built_epoch = grid.epoch;
 
-    let NavField { dist, surface, raw_surface, queue, .. } = &mut *nav;
+    let NavField { dist, surface, raw_surface, nearest_mouth, queue, .. } = &mut *nav;
     dist.fill(UNREACHABLE);
     queue.clear();
 
@@ -356,6 +415,40 @@ pub fn rebuild_nav_field(mut nav: ResMut<NavField>, grid: Res<SandGrid>) {
         let hi = (x + SURFACE_ENVELOPE).min(GRID_W - 1);
         surface[x] = raw_surface[lo..=hi].iter().copied().max().unwrap_or(0);
     }
+
+    // Entrances: a column sunk well below the ground on *both* sides. See `MOUTH_DIP`.
+    const NONE: u32 = GRID_W as u32;
+    let highest = |lo: usize, hi: usize| raw_surface[lo..=hi].iter().copied().max().unwrap_or(0);
+    for x in 0..GRID_W {
+        // The columns against the glass have only one side, so they can't be judged.
+        nearest_mouth[x] = if x > 0 && x + 1 < GRID_W {
+            let left = highest(x.saturating_sub(SURFACE_ENVELOPE), x - 1);
+            let right = highest(x + 1, (x + SURFACE_ENVELOPE).min(GRID_W - 1));
+            if left.min(right) >= raw_surface[x] + MOUTH_DIP { x as u32 } else { NONE }
+        } else {
+            NONE
+        };
+    }
+
+    // Nearest entrance to each column, in two linear sweeps — haulers read this every
+    // tick, so it can't be a search. Both sweeps compare by absolute distance: after the
+    // forward pass a column's answer may well lie to its left, so neither direction can
+    // assume the sign.
+    let mut spread = |xs: &mut dyn Iterator<Item = usize>, from: fn(usize) -> usize| {
+        for x in xs {
+            let candidate = nearest_mouth[from(x)];
+            if candidate == NONE {
+                continue;
+            }
+            let better = nearest_mouth[x] == NONE
+                || (candidate as usize).abs_diff(x) < (nearest_mouth[x] as usize).abs_diff(x);
+            if better {
+                nearest_mouth[x] = candidate;
+            }
+        }
+    };
+    spread(&mut (1..GRID_W), |x| x - 1);
+    spread(&mut (0..GRID_W - 1).rev(), |x| x + 1);
 
     while let Some(i) = queue.pop_front() {
         let i = i as usize;
