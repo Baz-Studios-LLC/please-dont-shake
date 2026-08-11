@@ -54,11 +54,11 @@ pub fn capture_mode() -> bool {
 
 /// `--sand-only` reruns the original M1 test with no colony in the tank, so the sand
 /// numbers stay comparable to the ones recorded in DESIGN.md.
-#[allow(dead_code)]
 pub fn sand_only() -> bool {
     std::env::args().any(|a| a == "--sand-only")
 }
 
+#[allow(dead_code)] // kept beside sand_only: the colony is placed by the harness now.
 pub fn colony_enabled() -> bool {
     !sand_only()
 }

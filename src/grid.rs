@@ -360,4 +360,7 @@ pub fn fill_strata(grid: &mut SandGrid, fill_h: usize) {
     grid.dirty.fill(true);
     grid.awake.fill(true);
     grid.next_awake.fill(true);
+    // A wholesale change, so bump the revision: the navigation flood skips rebuilding
+    // when the grid looks untouched, and a refilled tank must not look untouched.
+    grid.epoch = grid.epoch.wrapping_add(1);
 }

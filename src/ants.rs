@@ -77,6 +77,9 @@ const DISLODGE_SECONDS: f32 = 0.9;
 /// moment the ant lands, so this is only ever an upper bound on the fall.
 const AIRBORNE_ON_PLACEMENT: f32 = 6.0;
 
+/// How wide an ant kit scatters across the tank as it pours in.
+const KIT_SPREAD: f32 = 16.0;
+
 /// How far a grain must be carried from where it was dug before it can be put down.
 ///
 /// Without this the colony digs and refills the same hole forever. On flat sand the
@@ -388,18 +391,12 @@ fn queen_bundle(assets: &AntAssets, pos: Vec2) -> impl Bundle {
 /// back rather than silently swallowed — holding over the middle of the sand shouldn't
 /// cost you one of ten workers.
 pub fn place_queued(
-    mut commands: Commands,
     mut queue: ResMut<PlacementQueue>,
     mut stock: ResMut<Stock>,
-    assets: Res<AntAssets>,
+    mut pour: ResMut<KitPour>,
     grid: Res<SandGrid>,
-    tank: Query<Entity, With<TankRoot>>,
     mut placed: Local<u32>,
 ) {
-    let Ok(tank) = tank.single() else {
-        return;
-    };
-
     for (item, at) in queue.0.drain(..) {
         let Some(pos) = nearest_free(&grid, at) else {
             stock.give(item);
@@ -411,21 +408,12 @@ pub fn place_queued(
 
         match item {
             StockItem::AntKit => {
-                // Tipped in together, clustered around the spot and scattered a little,
-                // the way a tube of ants actually goes into a farm.
-                commands.spawn((queen_bundle(&assets, pos), ChildOf(tank)));
-                for i in 0..KIT_WORKERS {
-                    let s = seed * 31 + i;
-                    let scatter = Vec2::new(
-                        (hash01(s, 7, 0xA47) - 0.5) * 12.0,
-                        (hash01(s, 11, 0xB53) - 0.5) * 4.0,
-                    );
-                    let at = nearest_free(&grid, pos + scatter).unwrap_or(pos);
-                    // Spread ages so labour divides itself immediately: some nurses,
-                    // some diggers, some at the surface. Real demography is M3.
-                    let age = 2.0 + hash01(s, 17, 0xD73) * 28.0;
-                    commands.spawn((worker_bundle(&assets, at, age, s), ChildOf(tank)));
-                }
+                // Start a pour rather than spawning eleven ants at once. Tipping a tube
+                // into a farm is a stream, not a block arriving — see `pour_kit`.
+                pour.remaining = 1 + KIT_WORKERS;
+                pour.x = pos.x;
+                pour.next_in = 0.0;
+                pour.seed = seed;
             }
             // Not simulated yet — the wedges are dimmed, so this shouldn't be reachable.
             StockItem::Food | StockItem::Water => stock.give(item),
@@ -926,4 +914,66 @@ impl Default for ColonyClock {
     fn default() -> Self {
         Self { days_per_second: 1.0 / 3600.0 }
     }
+}
+
+/// An ant kit mid-pour: how many are still to come, and where they're going in.
+///
+/// A kit arrives as a stream, the way tipping a tube actually looks, rather than eleven
+/// ants materialising in formation. Same reasoning as pouring sand — the arrival is part
+/// of what makes it read as *you* putting them in.
+#[derive(Resource, Default)]
+pub struct KitPour {
+    pub remaining: u32,
+    pub x: f32,
+    pub next_in: f32,
+    pub seed: u32,
+}
+
+/// Seconds between ants while a kit pours in. Eleven of them takes about two seconds.
+const KIT_DROP_INTERVAL: f32 = 0.18;
+
+/// Drip the kit in, one ant at a time, from the top of the tank.
+///
+/// The queen comes first and the workers follow. They fall from the open top and land
+/// wherever the sand happens to be — there is no placement logic here at all, because
+/// gravity and `touching_sand` already do it.
+pub fn pour_kit(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut pour: ResMut<KitPour>,
+    assets: Res<AntAssets>,
+    tank: Query<Entity, With<TankRoot>>,
+) {
+    if pour.remaining == 0 {
+        return;
+    }
+    let Ok(tank) = tank.single() else {
+        return;
+    };
+
+    pour.next_in -= time.delta_secs();
+    if pour.next_in > 0.0 {
+        return;
+    }
+    pour.next_in = KIT_DROP_INTERVAL;
+
+    let index = pour.remaining;
+    let s = pour.seed.wrapping_mul(31).wrapping_add(index);
+    let spread = (hash01(s, 7, 0xA47) - 0.5) * KIT_SPREAD;
+    let at = Vec2::new(
+        (pour.x + spread).clamp(1.0, GRID_W as f32 - 2.0),
+        (GRID_H - 2) as f32,
+    );
+
+    // The queen leads, so the first thing in is the one that matters.
+    if pour.remaining == 1 + KIT_WORKERS {
+        commands.spawn((queen_bundle(&assets, at), ChildOf(tank)));
+    } else {
+        // Spread ages so labour divides itself immediately: some nurses, some diggers,
+        // some at the surface. Real demography is M3.
+        let age = 2.0 + hash01(s, 17, 0xD73) * 28.0;
+        commands.spawn((worker_bundle(&assets, at, age, s), ChildOf(tank)));
+    }
+
+    pour.remaining -= 1;
 }

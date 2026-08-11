@@ -20,6 +20,7 @@
 mod ants;
 mod audio;
 mod devcapture;
+mod farm;
 mod grains;
 mod grid;
 mod interact;
@@ -116,6 +117,7 @@ fn main() {
         .init_resource::<radial::Stock>()
         .init_resource::<radial::PlacementQueue>()
         .init_resource::<pause::PauseMenu>()
+        .init_resource::<ants::KitPour>()
         .add_systems(
             Startup,
             (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
@@ -126,8 +128,12 @@ fn main() {
             (title::enter_title, title::dress_menu).chain(),
         )
         .add_systems(OnExit(GameState::Title), title::exit_title)
-        // Leaving play tears the Esc menu down with it.
-        .add_systems(OnExit(GameState::Playing), pause::close_on_leave)
+        // Leaving play tears the Esc menu down, and throws the farm away: the title
+        // screen shows an empty tank, and one full of somebody's tunnels is not empty.
+        .add_systems(
+            OnExit(GameState::Playing),
+            (pause::close_on_leave, farm::reset_farm),
+        )
         .add_systems(
             FixedUpdate,
             (
@@ -149,6 +155,7 @@ fn main() {
                 pointer_input.run_if(in_state(GameState::Playing)),
                 tank_spring,
                 ants::place_queued,
+                ants::pour_kit,
                 radial::sync_radial_ui,
                 sync_ant_transforms,
                 remesh_dirty_chunks,
