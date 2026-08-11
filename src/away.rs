@@ -51,12 +51,20 @@ const STEP_DAYS: f64 = 0.1;
 /// this design's own timescale.
 const MAX_DAYS: f64 = 90.0;
 
+/// Below this, there is nothing to settle up and the run is skipped.
+///
+/// A minute, not a step: the loop's last slice is whatever is left, so a gap of an hour is one
+/// short step rather than a rounding error. Dropping everything under a step would quietly bin
+/// two and a half hours of colony time every time the app was opened, which for anyone who
+/// looks in on the farm a few times a day is most of the time they were away.
+const MIN_DAYS: f64 = 1.0 / 1440.0;
+
 /// Settle up, once, at startup. After `load_farm`, which is what tells it how long.
 ///
 /// Exclusive because it drives other systems, which is not something a normal system can do.
 pub fn catch_up_while_away(world: &mut World) {
     let owed = std::mem::take(&mut world.resource_mut::<AwaySpan>().0);
-    if owed < STEP_DAYS {
+    if owed < MIN_DAYS {
         return;
     }
 
@@ -132,6 +140,7 @@ mod tests {
         const {
             assert!(STEP_DAYS < 0.35, "a step longer than the laying interval batches eggs");
             assert!(MAX_DAYS / STEP_DAYS < 2000.0, "the catch-up loop is effectively unbounded");
+            assert!(MIN_DAYS < STEP_DAYS, "a gap smaller than one step must still be settled");
         }
     }
 
@@ -234,6 +243,24 @@ mod tests {
         assert_eq!((stats.laid, stats.eclosed, stats.died), (0, 0, 0));
         assert_eq!(ages(&mut app), vec![30.0], "a worker aged while the farm was waiting");
         assert_eq!(remaining(&mut app), 1, "the brood changed while the farm was waiting");
+    }
+
+    /// An hour's gap is an hour, not nothing. Someone who looks in on the farm over breakfast
+    /// and again at lunch must not have both gaps rounded away.
+    #[test]
+    fn an_hour_away_is_an_hour() {
+        let mut app = farm(1.0 / 24.0, true);
+        app.update();
+
+        let queen = {
+            let mut query = app.world_mut().query_filtered::<&Ant, With<Queen>>();
+            query.iter(app.world()).next().unwrap().age_days
+        };
+        assert!(
+            (queen - (400.0 + 1.0 / 24.0)).abs() < 1e-9,
+            "an hour away aged the queen {} days",
+            queen - 400.0,
+        );
     }
 
     /// A machine whose clock jumped forward — or a farm genuinely abandoned for a year —
