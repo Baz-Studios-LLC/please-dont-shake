@@ -182,7 +182,12 @@ const WINDOW_WIDTH: f32 = 680.0;
 /// rather than growing and shrinking as you move between them. A dialog that resizes under
 /// the pointer moves the thing you were about to click. The footer is pushed to the bottom of
 /// it by a spring, so a tab with one setting in it still looks deliberate.
-const WINDOW_HEIGHT: f32 = 400.0;
+///
+/// Being fixed means it has to be tall enough for the *fullest* tab, and nothing warns you
+/// when it isn't: adding a third setting to Gameplay at 400px pushed the divider and the Done
+/// button clean out of the bottom of the card and onto the sand behind it. Flexbox shrinks and
+/// overflows rather than complaining. Re-shoot `--settings-shot` after adding a row.
+const WINDOW_HEIGHT: f32 = 470.0;
 const WINDOW_PAD: f32 = 30.0;
 /// Between the window's own bands: heading, tabs, content, footer.
 const BAND_GAP: f32 = 22.0;
@@ -218,7 +223,9 @@ const ROWS: [(usize, Control, &str, &str); 5] = [
         2,
         Control::Away,
         "Grow while closed",
-        "The colony keeps living when the game isn't running. Nothing digs while you're gone.",
+        // One line at this width. A hint that wraps costs a row of height on the tallest tab,
+        // which is the tab that decides how tall the window has to be.
+        "The colony keeps living while the game is closed. Nothing digs.",
     ),
 ];
 
