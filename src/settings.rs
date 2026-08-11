@@ -105,15 +105,47 @@ pub struct Nudge {
 #[derive(Component)]
 pub struct Done;
 
-/// The window's frame, so its width can be set without a second `Node`.
+// The window's parts. Each one is spaced by `size_settings_ui` rather than by a `Node` at
+// spawn, because every piece here comes out of Ordo already carrying one.
 #[derive(Component)]
 pub struct SettingsFrame;
+
+#[derive(Component)]
+pub struct SettingsPane;
+
+#[derive(Component)]
+pub struct SettingsDivider;
+
+/// A setting's name-and-control line, together with its hint.
+#[derive(Component)]
+pub struct SettingsLine;
 
 /// The value half of a labelled row, so it can be rewritten without rebuilding the window.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub struct Reading(pub Control);
 
-const WINDOW_WIDTH: f32 = 460.0;
+/// The window's own size and spacing, in pixels.
+///
+/// Set here rather than by leaning on the theme's metrics, which are deliberately tight: they
+/// have to suit a HUD panel and a menu button as well as this, and a dialog wants more air
+/// than a button does. Ordo's pieces are sized by a pass either way — they bring their own
+/// `Node` and a second one in the same bundle is a panic — so putting real numbers in that
+/// pass costs nothing extra.
+const WINDOW_WIDTH: f32 = 680.0;
+/// Fixed, not a minimum, and so is the width: the window must be the *same box* on every tab
+/// rather than growing and shrinking as you move between them. A dialog that resizes under
+/// the pointer moves the thing you were about to click. The footer is pushed to the bottom of
+/// it by a spring, so a tab with one setting in it still looks deliberate.
+const WINDOW_HEIGHT: f32 = 400.0;
+const WINDOW_PAD: f32 = 30.0;
+/// Between the window's own bands: heading, tabs, content, footer.
+const BAND_GAP: f32 = 22.0;
+/// Between settings inside one pane.
+const SETTING_GAP: f32 = 26.0;
+/// Between a setting's name and the line explaining it.
+const HINT_GAP: f32 = 8.0;
+/// Air above and below a divider, so it separates rather than crowds.
+const RULE_MARGIN: f32 = 4.0;
 
 const TABS: [&str; 3] = ["Video", "Audio", "Gameplay"];
 
@@ -168,7 +200,7 @@ fn build(commands: &mut Commands, settings: &Settings) {
     let frame = commands
         .spawn((SettingsFrame, card(), ChildOf(root), children![heading("Settings")]))
         .id();
-    commands.spawn((rule(), ChildOf(frame)));
+    commands.spawn((rule(), SettingsDivider, ChildOf(frame)));
 
     let strip = commands.spawn((tab_strip(), ChildOf(frame))).id();
     for (index, name) in TABS.iter().enumerate() {
@@ -176,19 +208,27 @@ fn build(commands: &mut Commands, settings: &Settings) {
     }
     // Under the strip, so the tabs read as tabs on top of the content rather than as three
     // more buttons floating above it.
-    commands.spawn((rule(), ChildOf(frame)));
+    commands.spawn((rule(), SettingsDivider, ChildOf(frame)));
 
     // One pane per tab. Ordo shows the open one and hides the rest, so nothing here has to
     // know which that is.
     let panes: Vec<Entity> = (0..TABS.len())
-        .map(|index| commands.spawn((pane(strip, index), ChildOf(frame))).id())
+        .map(|index| {
+            commands
+                .spawn((pane(strip, index), SettingsPane, ChildOf(frame)))
+                .id()
+        })
         .collect();
 
     for (pane_index, control, name, hint) in ROWS {
         setting_row(commands, panes[pane_index], control, name, hint, settings);
     }
 
-    commands.spawn((rule(), ChildOf(frame)));
+    // Eats the rest of the window's height, so the footer sits on the bottom edge however
+    // few settings the open tab has. Without it a short pane leaves Done floating in the
+    // middle of a tall window, which reads as a layout accident rather than a footer.
+    commands.spawn((spring(), ChildOf(frame)));
+    commands.spawn((rule(), SettingsDivider, ChildOf(frame)));
 
     // The footer. Done sits at the right on its own line, the way a dialog's dismissal does
     // — full width, it read as the window's main business rather than the way out of it.
@@ -207,7 +247,12 @@ fn setting_row(
     hint: &str,
     settings: &Settings,
 ) {
-    let line = commands.spawn((row(), ChildOf(parent))).id();
+    // Carries its own `Node` — unlike everything else here it isn't an Ordo bundle, and a UI
+    // child whose parent has no `Node` is a layout warning and a wrong answer.
+    let group = commands
+        .spawn((SettingsLine, Node::default(), ChildOf(parent)))
+        .id();
+    let line = commands.spawn((row(), ChildOf(group))).id();
     commands.spawn((body(name), ChildOf(line)));
     commands.spawn((spring(), ChildOf(line)));
 
@@ -220,7 +265,7 @@ fn setting_row(
         .insert(Nudge { control, up: false });
     commands.entity(parts.up).insert(Nudge { control, up: true });
 
-    commands.spawn((dim(hint), ChildOf(parent)));
+    commands.spawn((dim(hint), ChildOf(group)));
 }
 
 fn reading_for(control: Control, settings: &Settings) -> String {
@@ -269,9 +314,43 @@ pub fn on_control_activate(
 ///
 /// A pass rather than `Node`s at spawn, for the reason above — and `Added`, so it costs
 /// nothing after the frame the window is built.
-pub fn size_settings_ui(mut frames: Query<&mut Node, Added<SettingsFrame>>) {
-    for mut node in &mut frames {
-        node.min_width = px(WINDOW_WIDTH);
+/// One query with the parts as flags, rather than four queries over `&mut Node`.
+///
+/// Four would have to be `Without` of *each other*, not just of the one before — Bevy refuses
+/// overlapping mutable access and says so at runtime, which is a panic on the frame the window
+/// first opens. Nothing here can be two parts at once, so a single query answers it.
+pub fn size_settings_ui(
+    mut parts: Query<
+        (
+            &mut Node,
+            Has<SettingsFrame>,
+            Has<SettingsPane>,
+            Has<SettingsLine>,
+        ),
+        Or<(
+            Added<SettingsFrame>,
+            Added<SettingsPane>,
+            Added<SettingsLine>,
+            Added<SettingsDivider>,
+        )>,
+    >,
+) {
+    for (mut node, frame, pane, line) in &mut parts {
+        match (frame, pane, line) {
+            (true, ..) => {
+                node.width = px(WINDOW_WIDTH);
+                node.height = px(WINDOW_HEIGHT);
+                node.padding = UiRect::all(px(WINDOW_PAD));
+                node.row_gap = px(BAND_GAP);
+            }
+            (_, true, _) => node.row_gap = px(SETTING_GAP),
+            (.., true) => {
+                node.flex_direction = FlexDirection::Column;
+                node.row_gap = px(HINT_GAP);
+            }
+            // A divider: the only part left, and all it wants is air either side.
+            _ => node.margin = UiRect::vertical(px(RULE_MARGIN)),
+        }
     }
 }
 
