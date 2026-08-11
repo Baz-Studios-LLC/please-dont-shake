@@ -35,11 +35,13 @@ pub struct Settings {
     pub music: u8,
     /// How hard a given hand movement shakes the tank, as an index into [`SHAKE_STEPS`].
     pub shake: u8,
+    /// The hand's skin, as an index into [`SKIN_TONES`].
+    pub skin: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { fullscreen: false, music: 3, shake: 1 }
+        Self { fullscreen: false, music: 3, shake: 1, skin: 1 }
     }
 }
 
@@ -51,6 +53,32 @@ const MUSIC_STEPS: [(f32, &str); 5] =
 /// for it. Not a difficulty setting — it's a mouse-feel setting, and the middle one is what
 /// the game was tuned against.
 pub const SHAKE_STEPS: [(f32, &str); 3] = [(0.6, "Gentle"), (1.0, "Normal"), (1.5, "Heavy")];
+
+/// The hand's skin, light to deep.
+///
+/// The hand is the player in this game — it is the only part of them that is ever on screen —
+/// so its colour is theirs to pick. Divus Factus reached the same conclusion about its own
+/// hand and for the same reason.
+///
+/// A real range rather than one colour darkened six times: skin does not vary along a single
+/// axis. Lighter tones sit pinker and less saturated, the middle of the range is the most
+/// saturated, and the deepest are darker without being any redder. Names describe lightness
+/// and nothing else.
+///
+/// The default is `Fair`, only because it is the tone the hand was already drawn in and the
+/// rest of the art was judged against it. It is a starting point, not a norm.
+pub const SKIN_TONES: [([f32; 3], &str); 6] = [
+    ([0.94, 0.81, 0.73], "Pale"),
+    ([0.86, 0.67, 0.56], "Fair"),
+    ([0.75, 0.57, 0.41], "Olive"),
+    ([0.62, 0.44, 0.30], "Tan"),
+    ([0.44, 0.30, 0.21], "Brown"),
+    ([0.28, 0.19, 0.14], "Deep"),
+];
+
+/// How much darker a knuckle is than the skin around it. One number, so a new tone is one
+/// line and the joints can never be forgotten.
+const KNUCKLE_SHADE: f32 = 0.84;
 
 impl Settings {
     pub fn music_volume(&self) -> f32 {
@@ -68,6 +96,17 @@ impl Settings {
 
     fn shake_name(&self) -> &'static str {
         SHAKE_STEPS[(self.shake as usize).min(SHAKE_STEPS.len() - 1)].1
+    }
+
+    /// The hand's skin, and the darker shade its knuckles take.
+    pub fn skin(&self) -> (Color, Color) {
+        let [r, g, b] = SKIN_TONES[(self.skin as usize).min(SKIN_TONES.len() - 1)].0;
+        let k = KNUCKLE_SHADE;
+        (Color::srgb(r, g, b), Color::srgb(r * k, g * k, b * k))
+    }
+
+    fn skin_name(&self) -> &'static str {
+        SKIN_TONES[(self.skin as usize).min(SKIN_TONES.len() - 1)].1
     }
 }
 
@@ -92,6 +131,7 @@ pub enum Control {
     Fullscreen,
     Music,
     Shake,
+    Skin,
 }
 
 /// A nudge on a control: which one, and which way.
@@ -153,7 +193,7 @@ const TABS: [&str; 3] = ["Video", "Audio", "Gameplay"];
 ///
 /// A table rather than three hand-built panes. The window's shape stops being something to
 /// maintain and becomes something to read, and adding a setting is one line here.
-const ROWS: [(usize, Control, &str, &str); 3] = [
+const ROWS: [(usize, Control, &str, &str); 4] = [
     (
         0,
         Control::Fullscreen,
@@ -167,6 +207,7 @@ const ROWS: [(usize, Control, &str, &str); 3] = [
         "Shake",
         "How hard your hand moves the tank.",
     ),
+    (2, Control::Skin, "Hand", "Your hand. It is the only part of you in the room."),
 ];
 
 /// Build and tear down the window to follow the flag.
@@ -273,6 +314,7 @@ fn reading_for(control: Control, settings: &Settings) -> String {
         Control::Fullscreen => if settings.fullscreen { "On" } else { "Off" }.to_string(),
         Control::Music => settings.music_name().to_string(),
         Control::Shake => settings.shake_name().to_string(),
+        Control::Skin => settings.skin_name().to_string(),
     }
 }
 
@@ -307,6 +349,7 @@ pub fn on_control_activate(
         Control::Fullscreen => settings.fullscreen = !settings.fullscreen,
         Control::Music => settings.music = step(settings.music, *up, MUSIC_STEPS.len()),
         Control::Shake => settings.shake = step(settings.shake, *up, SHAKE_STEPS.len()),
+        Control::Skin => settings.skin = step(settings.skin, *up, SKIN_TONES.len()),
     }
 }
 
@@ -481,18 +524,47 @@ mod tests {
     /// end of a table. `serde(default)` covers missing fields; this covers wrong ones.
     #[test]
     fn a_nonsense_value_is_clamped_rather_than_fatal() {
-        let settings = Settings { fullscreen: false, music: 200, shake: 200 };
+        let settings = Settings { fullscreen: false, music: 200, shake: 200, skin: 200 };
         assert_eq!(settings.music_volume(), MUSIC_STEPS[MUSIC_STEPS.len() - 1].0);
         assert_eq!(settings.shake_scale(), SHAKE_STEPS[SHAKE_STEPS.len() - 1].0);
+        assert_eq!(settings.skin_name(), SKIN_TONES[SKIN_TONES.len() - 1].1);
     }
 
-    /// The defaults are the tuning the game was built against: the middle shake, and music
-    /// at the level `setup_music` used before there was a setting for it.
+    /// The defaults are the tuning the game was built against: the middle shake, music at the
+    /// level `setup_music` used before there was a setting for it, and the tone the hand was
+    /// already drawn in.
     #[test]
     fn the_defaults_are_what_the_game_was_tuned_at() {
         let settings = Settings::default();
         assert_eq!(settings.shake_scale(), 1.0, "the default shake must not scale anything");
         assert_eq!(settings.music_volume(), 0.65);
         assert!(!settings.fullscreen);
+        assert_eq!(settings.skin_name(), "Fair");
+    }
+
+    /// Skin runs light to deep with no reversals, and every tone's knuckles are darker than
+    /// its skin. Both are properties of the table that a hand-edited entry could break, and
+    /// neither would be obvious on the tone you happened to be looking at.
+    #[test]
+    fn the_skin_tones_run_light_to_deep() {
+        let luma = |c: Color| {
+            let s = c.to_srgba();
+            0.2126 * s.red + 0.7152 * s.green + 0.0722 * s.blue
+        };
+        let mut previous = f32::MAX;
+        for index in 0..SKIN_TONES.len() as u8 {
+            let settings = Settings { skin: index, ..Default::default() };
+            let (skin, knuckle) = settings.skin();
+            assert!(
+                luma(skin) < previous,
+                "tone {index} ({}) is not darker than the one before it",
+                settings.skin_name(),
+            );
+            assert!(
+                luma(knuckle) < luma(skin),
+                "tone {index} has knuckles no darker than its skin",
+            );
+            previous = luma(skin);
+        }
     }
 }

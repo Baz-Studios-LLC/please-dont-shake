@@ -99,6 +99,23 @@ fn cell_of(local: Vec3) -> Vec2 {
     Vec2::new(cx, cy)
 }
 
+/// Is the game's own surface reachable, or is there a window over it?
+///
+/// The verbs read the mouse directly, so without this a click on a settings stepper is *also*
+/// a tap on the glass, and a drag across the Esc menu shakes the tank behind it. Both were
+/// true — the Esc menu since it was built — and both are the kind of bug a player reads as
+/// the game being haunted rather than as a missing guard.
+///
+/// While something is in front of the tank, the verbs simply do not exist. That is also the
+/// honest reading of a modal: it is a thing put in front of the farm, and you cannot reach
+/// past it.
+pub fn the_farm_is_reachable(
+    settings: Res<crate::settings::SettingsWindow>,
+    pause: Res<crate::pause::PauseMenu>,
+) -> bool {
+    !settings.open && !pause.open
+}
+
 /// Tell the hand what it's doing.
 ///
 /// Runs in every state, unlike the verbs — the hand is the cursor on the title screen too,
@@ -113,6 +130,8 @@ pub fn track_touch(
     window: Single<&Window>,
     state: Res<State<GameState>>,
     menu: Res<RadialMenu>,
+    settings: Res<crate::settings::SettingsWindow>,
+    pause: Res<crate::pause::PauseMenu>,
     mut touch: ResMut<Touch>,
     mut travel: Local<f32>,
     mut last: Local<Option<Vec2>>,
@@ -129,10 +148,16 @@ pub fn track_touch(
     *last = at;
 
     // A palm plants on the glass only during play, and only once the gesture is genuinely a
-    // drag. Not while the wheel is open: that drag is aiming, not shaking.
+    // drag. Not while the wheel is open — that drag is aiming, not shaking — and not with a
+    // window in front of the tank, where the hand is working the interface and there is
+    // nothing to take hold of.
     touch.at = at;
-    touch.grabbing =
-        held && *travel > TAP_SLOP_PX && *state.get() == GameState::Playing && !menu.open;
+    touch.grabbing = held
+        && *travel > TAP_SLOP_PX
+        && *state.get() == GameState::Playing
+        && !menu.open
+        && !settings.open
+        && !pause.open;
     // A fingertip and a whole palm are different gestures, so they don't overlap.
     touch.pressing = held && !touch.grabbing;
 }

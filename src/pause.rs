@@ -41,9 +41,22 @@ pub struct PauseMenu {
 
 const MENU_WIDTH: f32 = 230.0;
 
-/// Esc opens it, and closes it again.
-pub fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut menu: ResMut<PauseMenu>) {
-    if keys.just_pressed(KeyCode::Escape) {
+/// Esc opens it, and closes it again — or closes whatever is on top of it first.
+///
+/// Settings can be opened from this menu, so Escape has to mean "back" rather than "toggle
+/// the pause menu". Otherwise the one key that should always get you out instead leaves the
+/// settings window sitting there with the menu gone from under it.
+pub fn toggle_pause(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut menu: ResMut<PauseMenu>,
+    mut settings: ResMut<crate::settings::SettingsWindow>,
+) {
+    if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if settings.open {
+        settings.open = false;
+    } else {
         menu.open = !menu.open;
     }
 }

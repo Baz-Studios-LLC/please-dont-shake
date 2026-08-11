@@ -68,6 +68,16 @@ pub struct HandModel;
 #[derive(Component)]
 pub struct HandCamera;
 
+/// The hand's two materials, kept so its skin can be changed while the game runs.
+///
+/// Two handles rather than a colour per mesh: every finger bone shares one of these, so a
+/// change lands on the whole hand at once and can't leave a joint behind.
+#[derive(Resource)]
+pub struct HandMaterials {
+    pub skin: Handle<StandardMaterial>,
+    pub knuckle: Handle<StandardMaterial>,
+}
+
 /// What the hand is doing. Written by the input path each frame; read here.
 ///
 /// Deliberately about intent rather than devices. A touchscreen would fill in exactly these
@@ -152,7 +162,9 @@ pub fn setup_hand(
 
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
-    // Skin, and a shade darker at the knuckles so the joints read at this size.
+    // Skin, and a shade darker at the knuckles so the joints read at this size. The colours
+    // are placeholders: `restyle_hand` writes the player's chosen tone over them on the first
+    // frame, and these are only what the hand looks like before it has run.
     //
     // Barely emissive. Enough that the hand never disappears into a dark stratum, not
     // enough to glow — the first cut carried ten times this and the hand came out as a white
@@ -170,6 +182,11 @@ pub fn setup_hand(
         perceptual_roughness: 0.82,
         reflectance: 0.03,
         ..default()
+    });
+
+    commands.insert_resource(HandMaterials {
+        skin: skin.clone(),
+        knuckle: knuckle.clone(),
     });
 
     let root = commands
@@ -384,6 +401,32 @@ fn pose_fingers(rig: &HandRig, joints: &mut Query<&mut Transform, Without<HandMo
     }
     if let Ok(mut joint) = joints.get_mut(thumb_tip) {
         joint.rotation = Quat::from_rotation_x(-(0.42 * (1.0 - splay) + 0.32 * splay));
+    }
+}
+
+/// Repaint the hand in whatever skin the player has chosen.
+///
+/// Here rather than in `settings`, because this module owns the materials — and driven by
+/// watching the setting rather than by being told when it changes, so a tone restored from
+/// disk at startup arrives by the same road as one just picked.
+pub fn restyle_hand(
+    settings: Res<crate::settings::Settings>,
+    handles: Option<Res<HandMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(handles) = handles else {
+        return;
+    };
+    if !settings.is_changed() && !handles.is_changed() {
+        return;
+    }
+
+    let (skin, knuckle) = settings.skin();
+    if let Some(mut material) = materials.get_mut(&handles.skin) {
+        material.base_color = skin;
+    }
+    if let Some(mut material) = materials.get_mut(&handles.knuckle) {
+        material.base_color = knuckle;
     }
 }
 

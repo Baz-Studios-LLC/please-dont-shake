@@ -189,8 +189,11 @@ fn main() {
                 // The hand is the cursor everywhere, so it's told what it's doing in every
                 // state; only the verbs are play-only.
                 interact::track_touch,
-                pointer_input.run_if(in_state(GameState::Playing)),
+                pointer_input
+                    .run_if(in_state(GameState::Playing))
+                    .run_if(interact::the_farm_is_reachable),
                 hand::move_hand,
+                hand::restyle_hand,
                 hand::hide_the_pointer,
                 tank_spring,
                 ants::place_queued,
