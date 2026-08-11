@@ -565,11 +565,11 @@ const C_QUIT: f32 = 125.0;
 
 /// Colony-days per real second for the scripted runs.
 ///
-/// The game runs at a colony day per real hour, so a two-minute capture covers three
-/// hundredths of a day and nothing about the brood is observable at all. At one day a second
+/// The game runs in real time — a colony day per day — so a two-minute capture covers a
+/// thousandth of a day and nothing about the brood is observable at all. At one day a second
 /// the same run covers a hundred and twenty-five days — twenty brood cycles — which is the
 /// only way a two-minute test can say anything about a six-day life stage.
-const CAPTURE_DAYS_PER_SECOND: f32 = 1.0;
+const CAPTURE_DAYS_PER_SECOND: f64 = 1.0;
 
 pub fn run_colony_capture(
     mut commands: Commands,

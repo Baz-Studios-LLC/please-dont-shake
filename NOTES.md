@@ -204,6 +204,21 @@ anything at all about brood.
 If the farm ever feels dead rather than slow, the honest levers are the three stage constants
 in `src/brood.rs`, not the clock.
 
+### Colony-days are `f64`, and that is not a preference
+
+Setting the rate to real time is not the same as the clock working. At `1/86400` days per
+second the sim adds `1.9e-7` days a tick, and a single-precision float holding an age of four
+days *cannot represent a step that small* — `age += 1.9e-7` rounds straight back to `age`.
+Measured, with `age_days` as `f32`: ages ran 24% fast between one and four days, then froze
+dead at four. No worker ever reached `NURSE_UNTIL`, so every ant was a nurse forever, nothing
+dug, and nobody died of old age. The clock said real time and the colony was a photograph.
+
+Anything that accumulates colony-days is `f64` — `Ant::age_days`, `Brood::age_days`,
+`LayClock`, `ColonyClock::days_per_second`, the stage and lifespan constants. It was invisible
+under the old hour-per-day rate, because that increment was 24× larger and stayed above the
+single-precision step. `a_worker_ages_a_day_in_a_day_at_any_age` in `src/ants.rs` guards it,
+and it starts the sum at thirty days rather than zero, which is the entire point of the test.
+
 ## Next: the queen goes missing at speed
 
 Brood works — see below — but the capture run at a colony day per second ends with the whole

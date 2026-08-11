@@ -29,16 +29,16 @@ use crate::grid::*;
 use crate::tank::TankRoot;
 
 /// Colony-days in each stage. Six days from laying to a walking worker.
-const EGG_DAYS: f32 = 2.0;
-const LARVA_DAYS: f32 = 2.5;
-const PUPA_DAYS: f32 = 1.5;
+const EGG_DAYS: f64 = 2.0;
+const LARVA_DAYS: f64 = 2.5;
+const PUPA_DAYS: f64 = 1.5;
 
 /// Colony-days between eggs, and how much brood a queen will keep going at once.
 ///
 /// The cap scales with the workforce because a real queen's laying rate does: a founding
 /// queen with ten workers cannot feed a hundred larvae, and a colony that tried would be
 /// modelling nothing.
-const LAY_INTERVAL: f32 = 0.35;
+const LAY_INTERVAL: f64 = 0.35;
 const BASE_CLUTCH: usize = 4;
 const CLUTCH_PER_WORKER: f32 = 0.5;
 
@@ -58,7 +58,7 @@ const PICKUP_REACH: f32 = 3.0;
 /// Real *Lasius* workers outlive this by a lot. It is scaled to the colony's own locked
 /// lifespan of 40–60 days instead, so a farm turns its workforce over several times before
 /// the queen's decline ends it, and the population is a curve rather than a climb.
-const WORKER_LIFESPAN: f32 = 35.0;
+const WORKER_LIFESPAN: f64 = 35.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stage {
@@ -68,7 +68,7 @@ pub enum Stage {
 }
 
 impl Stage {
-    fn lasts(self) -> f32 {
+    fn lasts(self) -> f64 {
         match self {
             Stage::Egg => EGG_DAYS,
             Stage::Larva => LARVA_DAYS,
@@ -89,8 +89,9 @@ impl Stage {
 #[derive(Component)]
 pub struct Brood {
     pub stage: Stage,
-    /// Colony-days spent in the *current* stage, not since laying.
-    pub age_days: f32,
+    /// Colony-days spent in the *current* stage, not since laying. `f64`, for the reason
+    /// spelled out on [`ColonyClock`].
+    pub age_days: f64,
     /// Grid coordinates, like an ant's. Brood are an overlay on the sand too.
     pub pos: Vec2,
     /// The nurse carrying it, if any.
@@ -108,7 +109,7 @@ pub struct BroodAssets {
 
 /// How long since the queen last laid, in colony-days.
 #[derive(Resource, Default)]
-pub struct LayClock(f32);
+pub struct LayClock(f64);
 
 /// What the harness reports. Population is the number that matters for brood the way mass is
 /// for sand: it should climb, and later it should fall.
@@ -166,7 +167,7 @@ pub fn lay_eggs(
         return;
     };
 
-    lay.0 += time.delta_secs() * clock.days_per_second;
+    lay.0 += time.delta_secs() as f64 * clock.days_per_second;
     if lay.0 < LAY_INTERVAL {
         return;
     }
@@ -203,7 +204,7 @@ pub fn age_brood(
     let (Some(assets), Ok(tank)) = (assets, tank.single()) else {
         return;
     };
-    let days = time.delta_secs() * clock.days_per_second;
+    let days = time.delta_secs() as f64 * clock.days_per_second;
 
     for (entity, mut item, mut material) in &mut brood {
         item.age_days += days;
@@ -386,7 +387,7 @@ mod tests {
         assert_eq!(Stage::Pupa.next(), None, "a pupa ecloses; it does not become brood");
 
         let total = Stage::Egg.lasts() + Stage::Larva.lasts() + Stage::Pupa.lasts();
-        assert_eq!(total, 6.0, "the compressed cycle is six colony days");
+        assert_eq!(total, 6.0, "the cycle is six colony days");
     }
 
     /// A queen with more workers keeps more brood going. The floor matters as much as the

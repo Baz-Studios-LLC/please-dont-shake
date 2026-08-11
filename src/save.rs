@@ -39,8 +39,8 @@ use crate::radial::Stock;
 
 /// How often a farm being played is written down.
 ///
-/// Thirty seconds of a colony's day is nothing — at the design's hour-per-day that's a
-/// twelfth of a colony minute — so the worst case is losing a few grains of digging.
+/// Thirty seconds of a colony's day is nothing — on a real-time clock it is thirty seconds of
+/// one — so the worst case is losing a few grains of digging.
 pub const AUTOSAVE_SECONDS: u64 = 30;
 
 /// Bumped when the layout changes in a way an older file can't be read as. A file from
@@ -114,7 +114,7 @@ struct SavedAnt {
     pos: [f32; 2],
     heading: [f32; 2],
     vel: [f32; 2],
-    age_days: f32,
+    age_days: f64,
     carrying: Option<u8>,
     dig_cooldown: f32,
     haul_time: f32,
@@ -501,7 +501,7 @@ mod tests {
         }
     }
 
-    fn test_ant(pos: Vec2, age_days: f32, carrying: Option<u8>) -> Ant {
+    fn test_ant(pos: Vec2, age_days: f64, carrying: Option<u8>) -> Ant {
         Ant {
             pos,
             heading: Vec2::new(0.6, -0.8),
@@ -585,7 +585,7 @@ mod tests {
         );
 
         let mut ants = next.world_mut().query::<(&Ant, Has<Queen>)>();
-        let mut found: Vec<(f32, bool, Option<u8>)> = ants
+        let mut found: Vec<(f64, bool, Option<u8>)> = ants
             .iter(next.world())
             .map(|(ant, queen)| (ant.age_days, queen, ant.carrying))
             .collect();

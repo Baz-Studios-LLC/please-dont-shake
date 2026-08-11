@@ -27,7 +27,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
 /// Cells per second. Our cells are ~1.2mm, so this is a shade under 2cm/s — about
-/// right for *Lasius*, and deliberately real-time even though biology is compressed.
+/// right for *Lasius*. Real-time, like everything else in the farm now is.
 const WALK_SPEED: f32 = 14.0;
 /// Alarm makes them faster and far less orderly.
 const ALARM_SPEED_BONUS: f32 = 12.0;
@@ -35,8 +35,8 @@ const ALARM_SPEED_BONUS: f32 = 12.0;
 const GRAVITY: f32 = 26.0;
 
 /// Colony-days. Real workers shift tasks with age rather than being assigned them.
-const NURSE_UNTIL: f32 = 10.0;
-const DIGGER_UNTIL: f32 = 26.0;
+const NURSE_UNTIL: f64 = 10.0;
+const DIGGER_UNTIL: f64 = 26.0;
 
 /// Seconds between excavation attempts — an ant gnaws, it doesn't vaporise sand.
 const DIG_INTERVAL: f32 = 0.45;
@@ -117,7 +117,7 @@ pub enum Job {
 }
 
 impl Job {
-    pub fn for_age(age_days: f32) -> Job {
+    pub fn for_age(age_days: f64) -> Job {
         if age_days < NURSE_UNTIL {
             Job::Nurse
         } else if age_days < DIGGER_UNTIL {
@@ -135,7 +135,10 @@ pub struct Ant {
     pub heading: Vec2,
     /// Only used while falling; walking ants move by their heading, not ballistically.
     pub vel: Vec2,
-    pub age_days: f32,
+    /// Colony-days since eclosion. `f64`, and it has to be: a real-time clock adds about
+    /// two ten-millionths of a day per tick, which is smaller than a single-precision step
+    /// at any age past four days. See [`ColonyClock`].
+    pub age_days: f64,
     /// The shade of the grain being hauled, if any. Carrying the *shade* is what makes
     /// spoil piles show the colour of the stratum they were dug out of.
     pub carrying: Option<u8>,
@@ -343,7 +346,7 @@ pub fn setup_ant_assets(
 
 
 /// Ant bodies, shared by founding and by player placement.
-fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f32, seed: u32) -> impl Bundle {
+fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f64, seed: u32) -> impl Bundle {
     (
         Ant {
             pos,
@@ -554,7 +557,7 @@ pub fn update_ants(
     stats.at_the_glass = 0;
 
     for (mut ant, is_queen) in &mut ants {
-        ant.age_days += dt * colony_day_per_sec.days_per_second;
+        ant.age_days += dt as f64 * colony_day_per_sec.days_per_second;
 
         let (cx, cy) = cell_of(ant.pos);
         let (ux, uy) = (
@@ -1002,11 +1005,21 @@ pub fn sync_ant_transforms(
     }
 }
 
-/// How fast biology runs. Sand and ant motion stay real-time; only the colony's own
-/// clock is compressed, at roughly one colony day per real hour.
+/// How fast biology runs. Sand and ant motion have always been real-time; this is the rate
+/// the colony's own clock — ageing, laying, eclosion, death — ticks at.
+///
+/// `f64`, and not as a matter of taste. At a day per day this adds `1.9e-7` days per tick,
+/// and a single-precision float carrying an age of four days cannot represent a step that
+/// small: `age += 1.9e-7` rounds straight back to `age` and the ant stops ageing, silently
+/// and forever. Measured, before this was `f64`: ages ran 24% fast between one and four days
+/// and then froze dead at four, so no worker ever reached `NURSE_UNTIL`, nothing ever dug,
+/// and nobody ever died. The clock said real time and the colony was a still photograph.
+///
+/// Anything accumulating colony-days is `f64` for the same reason. A rate this slow is only
+/// meaningful if the sum can hold it.
 #[derive(Resource)]
 pub struct ColonyClock {
-    pub days_per_second: f32,
+    pub days_per_second: f64,
 }
 
 impl Default for ColonyClock {
@@ -1084,9 +1097,63 @@ pub fn pour_kit(
     } else {
         // Spread ages so labour divides itself immediately: some nurses, some diggers,
         // some at the surface. Real demography is M3.
-        let age = 2.0 + hash01(s, 17, 0xD73) * 28.0;
+        let age = (2.0 + hash01(s, 17, 0xD73) * 28.0) as f64;
         commands.spawn((worker_bundle(&assets, at, age, s), ChildOf(tank)));
     }
 
     pour.remaining -= 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fixed timestep, from `SIM_HZ` in main.rs. The colony is aged from `Time`'s delta
+    /// inside `FixedUpdate`, so this is the size of the step the sum has to survive.
+    const DT: f32 = 1.0 / 60.0;
+
+    /// A day of real time has to move a worker's age by a day — at *any* age.
+    ///
+    /// This is the whole real-time clock in one test. The rate is `1/86400` days per second,
+    /// which is `1.9e-7` days a tick, and the failure it guards is not an off-by-a-bit: with
+    /// `age_days` as `f32` this loop moved a thirty-day-old ant by exactly zero, because that
+    /// increment is below half a single-precision step at 30.0 and every add rounded home.
+    /// Ants stopped ageing at four days, so none reached `NURSE_UNTIL`, none dug, and none
+    /// died of old age. Starting the loop at 30.0 rather than 0.0 is the point of it.
+    #[test]
+    fn a_worker_ages_a_day_in_a_day_at_any_age() {
+        let clock = ColonyClock::default();
+        for start in [0.0, 4.0, 30.0, 400.0] {
+            let mut age_days: f64 = start;
+            for _ in 0..(60 * 60 * 60 * 24) {
+                age_days += DT as f64 * clock.days_per_second;
+            }
+            let gained = age_days - start;
+            assert!(
+                (gained - 1.0).abs() < 1e-6,
+                "at age {start} a day of real time advanced the colony by {gained} days",
+            );
+        }
+    }
+
+    /// And the ageing has to reach the thresholds it gates. A worker one real day short of
+    /// digging becomes a digger; ten real days later it is on the surface.
+    #[test]
+    fn a_worker_changes_job_as_the_days_pass() {
+        assert_eq!(Job::for_age(NURSE_UNTIL - 0.001), Job::Nurse);
+        assert_eq!(Job::for_age(NURSE_UNTIL), Job::Digger);
+        assert_eq!(Job::for_age(DIGGER_UNTIL), Job::Surface);
+
+        let clock = ColonyClock::default();
+        let mut age_days: f64 = NURSE_UNTIL - 0.5;
+        assert_eq!(Job::for_age(age_days), Job::Nurse);
+        for _ in 0..(60 * 60 * 60 * 24) {
+            age_days += DT as f64 * clock.days_per_second;
+        }
+        assert_eq!(
+            Job::for_age(age_days),
+            Job::Digger,
+            "a nurse half a day off digging must be digging tomorrow",
+        );
+    }
 }
