@@ -45,9 +45,17 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Linux deps (Bevy needs ALSA + udev)
+      # Bevy 0.19's default features want a windowing stack as well as audio and input.
+      # ALSA + udev alone is what Violet Edge installs and it is not enough here: the
+      # first run died on wayland-client missing from pkg-config.
+      - name: Install Linux deps
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libudev-dev \
+            libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev
       - name: Build
         run: cargo build --release
 
@@ -67,15 +75,28 @@ jobs:
           set -euo pipefail
           bash packaging/macos-app.sh target/release/please_dont_shake "${{ steps.ver.outputs.version }}" build
           mkdir -p dist
+          # The tarball first, and unconditionally: this is the asset the launcher
+          # installs from, so it must not depend on anything below it succeeding.
           tar -czf "dist/please-dont-shake-macos-aarch64.app.tar.gz" -C build PleaseDontShake.app
-          # And a disk image for people who'd rather drag it to Applications.
-          # Freed first: hdiutil needs scratch space and the build is done with it.
+
+          # Freed before the disk image: hdiutil needs scratch space, and the build is
+          # done with all of this.
           rm -rf target ~/.cargo/registry ~/.cargo/git
-          mkdir dmgroot
-          cp -R build/PleaseDontShake.app dmgroot/
-          ln -s /Applications dmgroot/Applications
-          hdiutil create -volname "Please Don't Shake" -srcfolder dmgroot -ov -format UDZO \
-            "dist/please-dont-shake-${TAG}-macos-arm64.dmg"
+          df -h / | tail -1
+
+          # A drag-to-Applications image for people who'd rather not use the launcher.
+          # Best-effort on purpose: the first run of this died with "no space left on
+          # device" and took the whole release with it, including the tarball that had
+          # already been built. A convenience artefact should not be able to do that.
+          if mkdir dmgroot \
+            && cp -R build/PleaseDontShake.app dmgroot/ \
+            && ln -s /Applications dmgroot/Applications \
+            && hdiutil create -volname "Please Don't Shake" -srcfolder dmgroot -ov \
+                 -format UDZO "dist/please-dont-shake-${TAG}-macos-arm64.dmg"; then
+            echo "built the .dmg"
+          else
+            echo "skipped the .dmg — the launcher tarball is what matters"
+          fi
 
       - name: Package — Windows .zip (binary + assets)
         if: runner.os == 'Windows'
