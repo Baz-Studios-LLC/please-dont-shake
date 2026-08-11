@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy = "0.19"
-ordo = { git = "https://github.com/Baz-Studios-LLC/Ordo", rev = "967e8f9523c808dea274f489027863fc888f0393", version = "0.1.0" }
+ordo = { git = "https://github.com/Baz-Studios-LLC/Ordo", rev = "16473c44eae388af1ad883f3a8f6a485d068b793", version = "0.1.0" }
 
 # The farm is written down as JSON: one file, no slots. See src/save.rs.
 serde = { version = "1", features = ["derive"] }

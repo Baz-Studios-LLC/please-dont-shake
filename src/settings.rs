@@ -86,14 +86,24 @@ pub struct SettingsWindow {
 #[derive(Component)]
 pub struct SettingsUi;
 
-/// A control, and what it changes. One click cycles it.
+/// A control, and what it changes.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
     Fullscreen,
     Music,
     Shake,
-    Close,
 }
+
+/// A nudge on a control: which one, and which way.
+#[derive(Component, Clone, Copy)]
+pub struct Nudge {
+    pub control: Control,
+    pub up: bool,
+}
+
+/// Closes the window.
+#[derive(Component)]
+pub struct Done;
 
 /// The window's frame, so its width can be set without a second `Node`.
 #[derive(Component)]
@@ -103,10 +113,29 @@ pub struct SettingsFrame;
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub struct Reading(pub Control);
 
-const WINDOW_WIDTH: f32 = 420.0;
-const VALUE_WIDTH: f32 = 130.0;
+const WINDOW_WIDTH: f32 = 460.0;
 
 const TABS: [&str; 3] = ["Video", "Audio", "Gameplay"];
+
+/// Every setting, in the pane it belongs to, with the line that explains it.
+///
+/// A table rather than three hand-built panes. The window's shape stops being something to
+/// maintain and becomes something to read, and adding a setting is one line here.
+const ROWS: [(usize, Control, &str, &str); 3] = [
+    (
+        0,
+        Control::Fullscreen,
+        "Fullscreen",
+        "Fills the screen. The farm keeps its shape either way.",
+    ),
+    (1, Control::Music, "Music", "The piano. Off is a setting too."),
+    (
+        2,
+        Control::Shake,
+        "Shake",
+        "How hard your hand moves the tank.",
+    ),
+];
 
 /// Build and tear down the window to follow the flag.
 pub fn sync_settings_ui(
@@ -124,16 +153,11 @@ pub fn sync_settings_ui(
 }
 
 fn build(commands: &mut Commands, settings: &Settings) {
-    // A scrim, so the window reads as something in front of the farm rather than more
-    // furniture in it. Ordo's backdrop is the game's dimmer, stated in the theme.
     // Ordo's `backdrop` already carries its own `Layer` — and its own `GlobalZIndex`
     // follows from that — so adding either here is a duplicate component, which Bevy treats
     // as a hard panic rather than a shrug. The radial menu taught this once already.
     let root = commands.spawn((SettingsUi, backdrop())).id();
 
-    // A card rather than a panel. A panel anchors itself absolutely and carries its own
-    // half-size pullback to apply at spawn; a card is a framed box that lets the backdrop's
-    // own centring put it in the middle, which is where this belongs.
     // A card rather than a panel. A panel anchors itself absolutely and carries its own
     // half-size pullback to apply at spawn; a card is a framed box that lets the backdrop's
     // own centring put it in the middle, which is where this belongs.
@@ -144,49 +168,59 @@ fn build(commands: &mut Commands, settings: &Settings) {
     let frame = commands
         .spawn((SettingsFrame, card(), ChildOf(root), children![heading("Settings")]))
         .id();
+    commands.spawn((rule(), ChildOf(frame)));
 
     let strip = commands.spawn((tab_strip(), ChildOf(frame))).id();
     for (index, name) in TABS.iter().enumerate() {
         commands.spawn((tab(name, index), ChildOf(strip)));
     }
+    // Under the strip, so the tabs read as tabs on top of the content rather than as three
+    // more buttons floating above it.
+    commands.spawn((rule(), ChildOf(frame)));
 
     // One pane per tab. Ordo shows the open one and hides the rest, so nothing here has to
     // know which that is.
-    let video = commands.spawn((pane(strip, 0), ChildOf(frame))).id();
-    setting_row(commands, video, Control::Fullscreen, "Fullscreen", settings);
+    let panes: Vec<Entity> = (0..TABS.len())
+        .map(|index| commands.spawn((pane(strip, index), ChildOf(frame))).id())
+        .collect();
 
-    let audio = commands.spawn((pane(strip, 1), ChildOf(frame))).id();
-    setting_row(commands, audio, Control::Music, "Music", settings);
+    for (pane_index, control, name, hint) in ROWS {
+        setting_row(commands, panes[pane_index], control, name, hint, settings);
+    }
 
-    let gameplay = commands.spawn((pane(strip, 2), ChildOf(frame))).id();
-    setting_row(commands, gameplay, Control::Shake, "Shake", settings);
-    commands.spawn((
-        dim("How hard your hand moves the tank."),
-        ChildOf(gameplay),
-    ));
+    commands.spawn((rule(), ChildOf(frame)));
 
-    commands.spawn(((button("Done"), Control::Close), ChildOf(frame)));
+    // The footer. Done sits at the right on its own line, the way a dialog's dismissal does
+    // — full width, it read as the window's main business rather than the way out of it.
+    let footer = commands.spawn((row(), ChildOf(frame))).id();
+    commands.spawn((spring(), ChildOf(footer)));
+    commands.spawn((button("Done"), Done, ChildOf(footer)));
 }
 
-/// A labelled row whose value is a button: the label on the left, the current choice on the
-/// right, and clicking the choice cycles it.
+/// A settings line: the name at the left, a stepper at the right, and underneath it one
+/// sentence saying what the thing is.
 fn setting_row(
     commands: &mut Commands,
     parent: Entity,
     control: Control,
     name: &str,
+    hint: &str,
     settings: &Settings,
 ) {
-    let row_entity = commands.spawn((row(), ChildOf(parent))).id();
-    commands.spawn((label(name), ChildOf(row_entity)));
-    // Width comes from `size_readings` rather than a `Node` in this bundle: Ordo's button
-    // brings its own, and two in one bundle is a hard panic.
-    commands.spawn((
-        button(&reading_for(control, settings)),
-        Reading(control),
-        control,
-        ChildOf(row_entity),
-    ));
+    let line = commands.spawn((row(), ChildOf(parent))).id();
+    commands.spawn((body(name), ChildOf(line)));
+    commands.spawn((spring(), ChildOf(line)));
+
+    let parts = stepper(commands, line, &reading_for(control, settings));
+    commands
+        .entity(parts.value)
+        .insert((Reading(control), control));
+    commands
+        .entity(parts.down)
+        .insert(Nudge { control, up: false });
+    commands.entity(parts.up).insert(Nudge { control, up: true });
+
+    commands.spawn((dim(hint), ChildOf(parent)));
 }
 
 fn reading_for(control: Control, settings: &Settings) -> String {
@@ -194,25 +228,40 @@ fn reading_for(control: Control, settings: &Settings) -> String {
         Control::Fullscreen => if settings.fullscreen { "On" } else { "Off" }.to_string(),
         Control::Music => settings.music_name().to_string(),
         Control::Shake => settings.shake_name().to_string(),
-        Control::Close => "Done".to_string(),
     }
 }
 
-/// One click cycles a control, or closes the window.
+/// Step an index within a table, stopping at each end.
+///
+/// Stopping rather than wrapping, now that there are two arrows. A wheel that wraps is fine
+/// when one button is the only way round; with a `<` beside a `>` it means the left arrow
+/// sometimes goes up, which is a small lie about what the control does.
+fn step(value: u8, up: bool, len: usize) -> u8 {
+    let last = (len - 1) as u8;
+    if up { value.saturating_add(1).min(last) } else { value.saturating_sub(1) }
+}
+
+/// A nudge either way, or Done.
 pub fn on_control_activate(
     activate: On<Activate>,
-    controls: Query<&Control>,
+    nudges: Query<&Nudge>,
+    done: Query<&Done>,
     mut settings: ResMut<Settings>,
     mut window: ResMut<SettingsWindow>,
 ) {
-    let Ok(control) = controls.get(activate.entity) else {
+    if done.get(activate.entity).is_ok() {
+        window.open = false;
+        return;
+    }
+    let Ok(Nudge { control, up }) = nudges.get(activate.entity) else {
         return;
     };
     match control {
+        // Two states, so either arrow flips it. Refusing one of them would be technically
+        // consistent and would read as a broken button.
         Control::Fullscreen => settings.fullscreen = !settings.fullscreen,
-        Control::Music => settings.music = (settings.music + 1) % MUSIC_STEPS.len() as u8,
-        Control::Shake => settings.shake = (settings.shake + 1) % SHAKE_STEPS.len() as u8,
-        Control::Close => window.open = false,
+        Control::Music => settings.music = step(settings.music, *up, MUSIC_STEPS.len()),
+        Control::Shake => settings.shake = step(settings.shake, *up, SHAKE_STEPS.len()),
     }
 }
 
@@ -220,15 +269,9 @@ pub fn on_control_activate(
 ///
 /// A pass rather than `Node`s at spawn, for the reason above — and `Added`, so it costs
 /// nothing after the frame the window is built.
-pub fn size_settings_ui(
-    mut frames: Query<&mut Node, (Added<SettingsFrame>, Without<Reading>)>,
-    mut readings: Query<&mut Node, Added<Reading>>,
-) {
+pub fn size_settings_ui(mut frames: Query<&mut Node, Added<SettingsFrame>>) {
     for mut node in &mut frames {
         node.min_width = px(WINDOW_WIDTH);
-    }
-    for mut node in &mut readings {
-        node.width = px(VALUE_WIDTH);
     }
 }
 
@@ -328,21 +371,30 @@ pub fn save_settings(settings: Res<Settings>) {
 mod tests {
     use super::*;
 
-    /// Cycling has to come back round rather than run off the end of the table, which is the
-    /// one thing that could panic here.
+    /// Stepping stops at both ends rather than wrapping or running off the table. Both ends
+    /// matter: `saturating_sub` on a `u8` guards the bottom and the `min` guards the top, and
+    /// either one missing is a panic on a value the player can reach by holding an arrow.
     #[test]
-    fn every_control_cycles_and_wraps() {
+    fn stepping_stops_at_both_ends() {
+        assert_eq!(step(0, false, 5), 0, "stepping down from the first should stay");
+        assert_eq!(step(4, true, 5), 4, "stepping up from the last should stay");
+        assert_eq!(step(2, true, 5), 3);
+        assert_eq!(step(2, false, 5), 1);
+
+        // And walked the whole way in both directions, reading the value each time — an
+        // index off the end of a table would panic rather than fail an assertion.
         let mut settings = Settings::default();
-        for _ in 0..MUSIC_STEPS.len() * 2 + 1 {
-            settings.music = (settings.music + 1) % MUSIC_STEPS.len() as u8;
-            // Reading it is the assertion: an index off the end would panic.
+        for _ in 0..MUSIC_STEPS.len() + 2 {
+            settings.music = step(settings.music, true, MUSIC_STEPS.len());
             let _ = settings.music_volume();
-            let _ = settings.music_name();
         }
-        for _ in 0..SHAKE_STEPS.len() * 2 + 1 {
-            settings.shake = (settings.shake + 1) % SHAKE_STEPS.len() as u8;
+        for _ in 0..MUSIC_STEPS.len() + 2 {
+            settings.music = step(settings.music, false, MUSIC_STEPS.len());
+            let _ = settings.music_volume();
+        }
+        for _ in 0..SHAKE_STEPS.len() + 2 {
+            settings.shake = step(settings.shake, true, SHAKE_STEPS.len());
             let _ = settings.shake_scale();
-            let _ = settings.shake_name();
         }
     }
 

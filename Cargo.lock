@@ -3938,7 +3938,7 @@ dependencies = [
 [[package]]
 name = "ordo"
 version = "0.1.0"
-source = "git+https://github.com/Baz-Studios-LLC/Ordo?rev=967e8f9523c808dea274f489027863fc888f0393#967e8f9523c808dea274f489027863fc888f0393"
+source = "git+https://github.com/Baz-Studios-LLC/Ordo?rev=16473c44eae388af1ad883f3a8f6a485d068b793#16473c44eae388af1ad883f3a8f6a485d068b793"
 dependencies = [
  "bevy",
  "serde",
