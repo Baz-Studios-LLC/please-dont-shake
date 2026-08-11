@@ -9,7 +9,20 @@ A 3D ant farm. You feed it, you tap it, and you are asked not to shake it.
 An ambient sandbox in the mould of David OReilly's *Mountain* — $0.99, one screen, no
 menus inside the world, something you leave running rather than sit down to play. The
 difference is what's underneath: a genuine ant colony simulation, accurate enough that
-the colony's behaviour *is* the storytelling.
+the colony's behaviour *is* the storytelling. More features than *Mountain*, the same
+spirit.
+
+**That spirit is what the real-time clock is for**, and it settles every argument about
+compressing it. This is not a game you sit in front of; it is a thing on your desk that
+you glance at. A day is a day because that is the only rate at which "glance at it and
+something has changed" is a *true* statement rather than a mechanic — and it is why the
+farm goes on living while the app is shut. The moment biology is compressed to fit a
+session, the tank becomes something you play instead of something that is simply there,
+and this stops being *Mountain* with ants in it.
+
+The corollary is a hard requirement rather than a nicety: a window ornament must cost
+nothing to leave open. Anything that spins a fan is a thing the player closes, and a
+closed window is the whole game lost.
 
 The tank is a side-view formicarium — a thin slab of sand between glass — filling the
 vast majority of the screen. The camera never moves.
