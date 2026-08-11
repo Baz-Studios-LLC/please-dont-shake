@@ -68,19 +68,59 @@ pub fn title_shot() -> bool {
     std::env::args().any(|a| a == "--title-shot")
 }
 
-pub fn run_title_shot(
+/// `--splash-shot` sits through the studio's mark and grabs three frames of it.
+///
+/// One frame can't verify a fade. Three — climbing, held, leaving — is the smallest set
+/// that shows the mark is animating rather than just being present, which is the failure
+/// mode Divus Factus actually had.
+pub fn splash_shot() -> bool {
+    std::env::args().any(|a| a == "--splash-shot")
+}
+
+/// When the mark is grabbed, in seconds of splash time: mid fade-in, mid hold, mid
+/// fade-out. The fade is 1.3s either side of a 1.8s hold.
+const SPLASH_SHOTS: [(f32, &str); 3] = [
+    (0.65, "splash-1-rising"),
+    (2.2, "splash-2-held"),
+    (3.75, "splash-3-leaving"),
+];
+
+pub fn run_splash_shot(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     mut cap: ResMut<DevCapture>,
-    target: Res<CaptureTarget>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let prev = cap.t;
     cap.t += time.delta_secs();
 
-    // The window, not the offscreen target: UI attaches to the camera drawing to the
-    // window, so an offscreen grab shows the farm but never the menu.
-    let _ = &target;
+    // The window, not the offscreen target: the mark is UI, and UI draws to the camera
+    // pointed at the window. An offscreen grab would show the farm the splash is hiding.
+    for (at, name) in SPLASH_SHOTS {
+        if prev < at && cap.t >= at {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(format!("{}/{name}.png", cap.out_dir)));
+        }
+    }
+
+    if prev < 5.5 && cap.t >= 5.5 {
+        exit.write(AppExit::Success);
+    }
+}
+
+pub fn run_title_shot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+
+    // The window, not the offscreen target — and see `shell_shot` in main for the other
+    // half of that: these runs also have to *skip* setting the offscreen target up, or
+    // the one camera renders into the texture and the window screenshot is solid black.
     if prev < 2.5 && cap.t >= 2.5 {
         commands
             .spawn(Screenshot::primary_window())

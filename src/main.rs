@@ -8,7 +8,8 @@
 //! - [`ants`] — the colony, and where nest architecture comes from
 //! - [`meshing`], [`tank`], [`grains`] — turning all of that into something to look at
 //! - [`interact`] — the verbs, kept deliberately thin
-//! - [`title`], [`devcapture`] — the menu, and the scripted verification runs
+//! - [`splash`], [`title`], [`pause`] — the shell around the farm
+//! - [`devcapture`] — the scripted verification runs
 //!
 //! Controls
 //!   click            tap the glass
@@ -29,6 +30,7 @@ mod pheromones;
 mod pause;
 mod radial;
 mod sand;
+mod splash;
 mod tank;
 mod title;
 
@@ -123,6 +125,13 @@ fn main() {
             (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
         )
         .add_plugins(ordo::OrdoPlugin::with_theme("theme.ordo.toml"))
+        // The studio's mark, over black, while the farm builds itself behind it.
+        .add_systems(OnEnter(GameState::Splash), splash::enter_splash)
+        .add_systems(OnExit(GameState::Splash), splash::exit_splash)
+        .add_systems(
+            Update,
+            splash::play_splash.run_if(in_state(GameState::Splash)),
+        )
         .add_systems(
             OnEnter(GameState::Title),
             (title::enter_title, title::dress_menu).chain(),
@@ -175,9 +184,11 @@ fn main() {
         .add_systems(Update, devcapture::screenshot_hotkey);
 
     // State registration has to come *after* DefaultPlugins, which is what brings
-    // StatesPlugin with it. Verification runs skip the menu and open straight into a
-    // live colony; the title-screen shot obviously has to stay on the menu.
-    if devcapture::capture_mode() && !devcapture::title_shot() {
+    // StatesPlugin with it. Verification runs skip the splash and the menu and open
+    // straight into a live colony; the title-screen shot starts at the splash like any
+    // other run, and `enter_splash` sends it on to the menu immediately.
+    let shell_shot = devcapture::title_shot() || devcapture::splash_shot();
+    if devcapture::capture_mode() && !shell_shot {
         app.insert_state(GameState::Playing);
     } else {
         app.init_state::<GameState>();
@@ -185,10 +196,20 @@ fn main() {
 
     // Scripted verification runs. Dev only.
     if devcapture::capture_mode() {
-        app.insert_resource(devcapture::DevCapture::new())
-            .add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
+        app.insert_resource(devcapture::DevCapture::new());
 
-        if devcapture::title_shot() {
+        // Offscreen rendering is what makes the sand runs immune to a sleeping display,
+        // but it moves the *only* camera off the window — and Bevy UI draws to whichever
+        // camera is on the window. So the two runs that exist to photograph UI have to
+        // keep the camera where it is and grab the window instead. Set the target up for
+        // them and the screenshot is a perfectly plausible sheet of black.
+        if !shell_shot {
+            app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
+        }
+
+        if devcapture::splash_shot() {
+            app.add_systems(Update, devcapture::run_splash_shot);
+        } else if devcapture::title_shot() {
             app.add_systems(Update, devcapture::run_title_shot);
         } else if devcapture::sand_only() {
             // The original M1 cohesion test, with no colony to disturb the numbers.

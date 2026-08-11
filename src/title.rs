@@ -21,7 +21,9 @@ use ordo::prelude::*;
 
 #[derive(States, Default, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum GameState {
+    /// The studio's mark over black. See [`crate::splash`].
     #[default]
+    Splash,
     Title,
     Playing,
 }
