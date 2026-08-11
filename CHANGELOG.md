@@ -3,6 +3,28 @@
 The top section of this file becomes the release notes, and the launcher shows it as
 "What's New" — so it's written for whoever is about to play, not for whoever wrote it.
 
+## v0.3.0
+
+The colony has a reason to dig now, and its clock is the one you're on.
+
+- **A brood, and nurses with something to do.** The queen lays where she stands, the youngest
+  workers carry the eggs into a pile beside her, and eggs become larvae, larvae become pupae,
+  and pupae get up and walk. Nothing tells anybody to build a pile — it's what two rules add
+  up to. The colony grows, replaces the workers it loses to old age, and the ants that used to
+  mill about in a hole are the ones raising it.
+- **Real time.** A colony day takes a day. Egg to worker is six days and a worker lives about
+  five weeks, and none of it is sped up. This is a farm to leave open on a second monitor and
+  glance at — you come back to a bigger pile and a longer tunnel, not to a cutscene.
+- **The tank waits while the game is closed**, so the days the colony needs are days you
+  actually had it running and everything you notice is something that really happened in front
+  of you. If you'd rather it kept living while shut, that's Gameplay ▸ Grow while closed.
+- **Ants that walk like ants.** They no longer cartwheel end over end up a steep slope, stall
+  in a hole running left and right without digging, park against the glass and stay there, or
+  stand in one place slowly spinning. A body turns to face where it's going.
+- **Your eggs are kept with your farm.** Closing the game no longer costs you the pile.
+- Sand is still conserved to the grain, now including the grain an ant was carrying when it
+  died of old age. It gets put down instead of going with it.
+
 ## v0.2.0
 
 Your farm is still there when you come back to it, and it's your hand on the glass.
