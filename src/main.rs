@@ -120,6 +120,7 @@ fn main() {
         .init_resource::<radial::PlacementQueue>()
         .init_resource::<pause::PauseMenu>()
         .init_resource::<ants::KitPour>()
+        .init_resource::<farm::GameInProgress>()
         .add_systems(
             Startup,
             (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
@@ -136,13 +137,20 @@ fn main() {
             OnEnter(GameState::Title),
             (title::enter_title, title::dress_menu).chain(),
         )
-        .add_systems(OnExit(GameState::Title), title::exit_title)
-        // Leaving play tears the Esc menu down, and throws the farm away: the title
-        // screen shows an empty tank, and one full of somebody's tunnels is not empty.
+        // Before Ordo's paint, not after: the fade writes `Opacity` and Ordo is what
+        // turns that into colours, so writing it afterwards would show up a frame late.
         .add_systems(
-            OnExit(GameState::Playing),
-            (pause::close_on_leave, farm::reset_farm),
+            Update,
+            title::fade_title
+                .before(ordo::OrdoSet)
+                .run_if(in_state(GameState::Title)),
         )
+        .add_systems(OnExit(GameState::Title), title::exit_title)
+        // The farm is *not* thrown away here. Going back to the title leaves the colony
+        // digging behind the menu, which is what Continue returns to; only New Game
+        // pours a fresh tank. See `farm`.
+        .add_systems(OnExit(GameState::Playing), pause::close_on_leave)
+        .add_systems(OnEnter(GameState::Playing), farm::mark_in_progress)
         .add_systems(
             FixedUpdate,
             (

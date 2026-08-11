@@ -91,20 +91,20 @@ pub fn sync_pause_ui(
 }
 
 /// One width for every entry, and grey for the ones with nothing behind them.
+///
+/// Sets the label's *role*, not its colour — see `title::dress_menu` for why writing
+/// `TextColor` here silently loses to Ordo's repaint pass.
 pub fn dress_pause_menu(
-    theme: Res<Theme>,
+    mut commands: Commands,
     mut actions: Query<(&PauseAction, &Children, &mut Node), Added<PauseAction>>,
-    mut colours: Query<&mut TextColor>,
 ) {
     for (action, children, mut node) in &mut actions {
         node.width = px(MENU_WIDTH);
         if action.enabled() {
             continue;
         }
-        for &child in children {
-            if let Ok(mut colour) = colours.get_mut(child) {
-                colour.0 = theme.color(Role::InkDim);
-            }
+        for child in children.iter() {
+            commands.entity(child).insert(Ink(Role::InkDim));
         }
     }
 }

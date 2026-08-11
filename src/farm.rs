@@ -1,8 +1,10 @@
-//! Farm lifecycle — starting one over.
+//! Farm lifecycle — starting one over, and knowing when not to.
 //!
-//! Leaving for the title screen throws the farm away and pours a fresh one. That is the
-//! honest reading of going back to the menu: the title screen shows an empty tank, and a
-//! tank still full of somebody's tunnels is not empty.
+//! A farm is thrown away by **New Game** and by nothing else. Going back to the title
+//! screen leaves it running: the colony keeps digging behind the menu, and Continue is
+//! there to walk back into it. That is what makes this an ambient game rather than a
+//! series of sessions — the farm is a thing you keep, and the only way to lose one is to
+//! ask for a new one.
 //!
 //! Everything the farm consists of has to be reset together, and it is spread across
 //! several resources — the sand, the two fields the colony coordinates through, the
@@ -17,6 +19,23 @@ use crate::pheromones::{NavField, Pheromones};
 use crate::radial::{PlacementQueue, RadialMenu, Stock};
 use crate::sand::GrainSpawnQueue;
 use bevy::prelude::*;
+
+/// Whether there is a farm worth going back to.
+///
+/// False at boot and true from the moment play begins. Nothing sets it back to false yet;
+/// when the queen's decline lands in M3 there will be a real end to a farm, and this is
+/// where it will be recorded.
+///
+/// It exists because "is a game in progress" cannot be read off the world. Counting ants
+/// says no for the first minute of every farm, since a new one starts with the kit still
+/// in stock and the player choosing where to tip it in.
+#[derive(Resource, Default)]
+pub struct GameInProgress(pub bool);
+
+/// Play has begun, so there is now something for Continue to return to.
+pub fn mark_in_progress(mut progress: ResMut<GameInProgress>) {
+    progress.0 = true;
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn reset_farm(

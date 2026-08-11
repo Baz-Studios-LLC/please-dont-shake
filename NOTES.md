@@ -11,6 +11,9 @@ the design and the locked decisions; this holds the state of play and the traps.
 | `Baz-Studios-LLC/Ordo` | UI kit — owns the radial menu widget | pinned by rev in Cargo.toml |
 | `Baz-Studios-LLC/baz-studios-launcher` | distribution | catalog row + art added, v0.1.21 |
 
+The local Ordo clone runs behind: `git pull --ff-only` in it before touching anything, or
+you'll branch from a commit the game's pinned rev isn't even descended from.
+
 Ordo is pinned **by rev**, never by path. Changing the widget means: commit in Ordo, push,
 copy the new rev into `Cargo.toml`, rebuild. There is no path dependency to shortcut this,
 on purpose — see Ordo's README.
@@ -53,7 +56,7 @@ rounds. Every claim about the colony should come from here:
 cargo test --release                                          # the sand model and the splash curve
 cargo run --release -- --capture --out /tmp/shots              # colony: stock, dig, tap, shake
 cargo run --release -- --capture --sand-only --out /tmp/shots  # the M1 sand test, no colony
-cargo run --release -- --capture --title-shot --out /tmp/shots  # one frame of the title screen
+cargo run --release -- --capture --title-shot --out /tmp/shots   # the title screen, both states, and the fade
 cargo run --release -- --capture --splash-shot --out /tmp/shots # three frames across the studio mark
 ```
 
@@ -85,6 +88,13 @@ Things that cost real time and will look like new bugs if forgotten.
 - **Bevy only compiles in Vorbis by default.** `wav`, `mp3` and `flac` are opt-in features.
   A perfectly valid WAV panicked the audio system and left a window with nothing in it.
   Ship OGG.
+- **Never write a colour Ordo paints.** The repaint pass owns `BackgroundColor`,
+  `BorderColor` and `TextColor` for anything carrying `Fill`, `Edge` or `Ink`, and it wins
+  — a colour written in `OnEnter` is overwritten in the same frame's `Update`. Both menus
+  dimmed their disabled entries this way and *neither had ever worked*; every label sat at
+  the same 236 from the day it was written. Change the **role** (`Ink(Role::InkDim)`) or
+  the **`Opacity`**, never the colour. Ordo's own docs call this out; it's still the
+  easiest mistake in the codebase to make, because writing the colour looks correct.
 - **A generic font family needs `system_font_discovery`.** Without it text renders as
   *nothing*. The theme names no fonts on purpose; Bevy's embedded default stands. A font
   named by **path** is safe, which is how the studio line gets its font.

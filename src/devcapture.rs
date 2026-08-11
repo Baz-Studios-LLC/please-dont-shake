@@ -14,6 +14,7 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::grid::*;
 use crate::tank::TankSpring;
+use crate::title::GameState;
 
 /// Offscreen render target used by capture mode.
 ///
@@ -109,24 +110,99 @@ pub fn run_splash_shot(
     }
 }
 
+/// `--title-shot` walks the title screen through both of its states and out.
+///
+/// One frame of a fresh title screen used to be enough, and isn't any more: the menu now
+/// says different things depending on whether a farm exists, keeps that farm running
+/// behind itself, and fades rather than cuts. All three are things a single boot-state
+/// screenshot cannot show.
+const MENU_FRESH_SHOT: f32 = 1.6;
+const MENU_START: f32 = 2.0;
+/// Long enough for the kit to pour in and the colony to break ground, so the frame taken
+/// at the title afterwards has something in it worth continuing.
+const MENU_BACK: f32 = 34.0;
+const MENU_CONTINUE_SHOT: f32 = 35.6;
+const MENU_FADE: f32 = 36.0;
+/// Mid-fade, at roughly half opacity. `TITLE_FADE` is half a second.
+const MENU_FADING_SHOT: f32 = 36.25;
+const MENU_PLAYING_SHOT: f32 = 37.5;
+const MENU_QUIT: f32 = 38.5;
+
 pub fn run_title_shot(
     mut commands: Commands,
     time: Res<Time>,
     mut cap: ResMut<DevCapture>,
+    mut next: ResMut<NextState<GameState>>,
+    state: Res<State<GameState>>,
+    progress: Res<crate::farm::GameInProgress>,
+    mut placements: ResMut<crate::radial::PlacementQueue>,
+    ants: Query<(), With<crate::ants::Ant>>,
+    buttons: Query<&crate::title::MenuAction>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let prev = cap.t;
     cap.t += time.delta_secs();
+    let crossed = |at: f32| prev < at && cap.t >= at;
+    // Collected rather than spawned on the spot, so the closure doesn't hold `Commands`
+    // borrowed for the whole body.
+    let mut shots: Vec<&str> = Vec::new();
 
+    if crossed(MENU_FRESH_SHOT) {
+        let entries: Vec<String> = buttons.iter().map(|a| format!("{a:?}")).collect();
+        info!("fresh title: in progress {} | buttons {:?}", progress.0, entries);
+        shots.push("title-1-fresh");
+    }
+
+    if crossed(MENU_START) {
+        next.set(GameState::Playing);
+        // Tip a kit in, so there is a colony to come back to.
+        let drop_at = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
+        placements.0.push((crate::radial::StockItem::AntKit, drop_at));
+    }
+
+    if crossed(MENU_BACK) {
+        info!("leaving play with {} ants in the tank", ants.iter().count());
+        next.set(GameState::Title);
+    }
+
+    if crossed(MENU_CONTINUE_SHOT) {
+        let entries: Vec<String> = buttons.iter().map(|a| format!("{a:?}")).collect();
+        info!(
+            "title over a running farm: in progress {} | buttons {:?} | {} ants still digging",
+            progress.0,
+            entries,
+            ants.iter().count(),
+        );
+        shots.push("title-2-continue");
+    }
+
+    // Straight at the resource rather than through a synthetic click: what's being
+    // checked here is that the fade takes the menu away and hands over, not that
+    // Ordo's buttons report presses — the observer does that.
+    if crossed(MENU_FADE) {
+        commands.init_resource::<crate::title::TitleFade>();
+    }
+    if crossed(MENU_FADING_SHOT) {
+        shots.push("title-3-fading");
+    }
+    if crossed(MENU_PLAYING_SHOT) {
+        info!(
+            "after the fade: state {:?} | {} ants",
+            state.get(),
+            ants.iter().count()
+        );
+        shots.push("title-4-playing");
+    }
     // The window, not the offscreen target — and see `shell_shot` in main for the other
     // half of that: these runs also have to *skip* setting the offscreen target up, or
     // the one camera renders into the texture and the window screenshot is solid black.
-    if prev < 2.5 && cap.t >= 2.5 {
+    for name in shots {
         commands
             .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(format!("{}/title.png", cap.out_dir)));
+            .observe(save_to_disk(format!("{}/{name}.png", cap.out_dir)));
     }
-    if prev < 3.5 && cap.t >= 3.5 {
+
+    if crossed(MENU_QUIT) {
         exit.write(AppExit::Success);
     }
 }

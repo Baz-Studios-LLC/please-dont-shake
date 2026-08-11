@@ -64,6 +64,31 @@ organs in their legs, and several species stridulate to alarm each other. You ar
 speaking to them in a channel they genuinely have. They respond, correctly, by treating
 you as a predator.
 
+### One farm, kept
+
+A farm is only ever destroyed by asking for a new one. Going back to the title screen
+doesn't end it: the colony carries on digging behind the menu, and **Continue** walks
+back into it. The title screen isn't a place the game stops, it's a place you can see it
+from — which is the only reading consistent with a game whose whole subject is
+accumulated history. A menu that quietly binned forty hours of tunnels would be doing
+the thing the player is asked not to.
+
+That is also why there is no **Load**, and never will be. Loading implies slots, and
+slots imply the farm is a document you keep copies of. There is one farm. It is the one
+in the tank.
+
+So the menu is three entries, and one of them is conditional:
+
+| | |
+|---|---|
+| **Continue** | Only when a farm exists. Fades the menu away to reveal it still running. |
+| **New Game** | Pours a fresh tank. The only thing in the game that discards a farm. |
+| **Settings** | Nothing behind it yet, so it's shown dimmed rather than hidden. |
+
+Continue is *absent* rather than dimmed on a first run, because it isn't an unfinished
+feature — it's a statement about the farm, and a greyed-out Continue would be claiming a
+farm exists when none does.
+
 ### The voice
 
 The tank never speaks. Everything outside the tank can.
