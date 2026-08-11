@@ -10,7 +10,7 @@
 //! situation [`SLOWEST_STEP`] exists for.
 
 use bevy::prelude::*;
-use bevy::text::FontSize;
+use bevy::text::{FontSize, LineHeight};
 
 use crate::title::GameState;
 
@@ -54,25 +54,68 @@ const MARK_WIDTH_PERCENT: f32 = 46.0;
 const STUDIO_FONT: &str = "fonts/FiraMono-Medium.ttf";
 
 /// Size of the studio's line, in pixels. Bigger than the fine print this usually is —
-/// on a 1280-wide window a 13px line was a grey smudge at the bottom of the screen.
-const STUDIO_LINE_SIZE: f32 = 26.0;
+/// on a 1280-wide window a 13px line was a grey smudge at the bottom of the screen — but
+/// still quiet enough to sit under the mark rather than compete with it.
+///
+/// Everything about the `©` below is derived from this, so it's the only number to change.
+const STUDIO_LINE_SIZE: f32 = 22.0;
 
-/// How far above the baseline Fira draws the `©`, as a fraction of the em.
+// ---------------------------------------------------------------------------
+// Setting the © on the line
+//
+// Fira draws the copyright sign as a *superior* mark — its outline sits well above the
+// baseline and reaches above cap height. That's deliberate, and it's how `©` and `®` are
+// conventionally set beside a wordmark (SF Mono does the same), but in a line of running
+// text it reads as a glyph floating above its neighbours. Bevy's UI text has no baseline
+// shift, so the sign is its own node: sized so it stands as tall as the digits, and
+// nudged down so its foot lands on their baseline.
+//
+// Everything below is read out of the font file's own tables rather than guessed, so the
+// two ends line up exactly instead of approximately. Re-measure if the face changes.
+// ---------------------------------------------------------------------------
+
+/// Fira Mono's em, in font units. It's 1000, so every figure here is per-mille.
+const EM: f32 = 1000.0;
+/// The `©` outline: bottom and top, in units above the baseline. From `glyf`.
+const MARK_FOOT: f32 = 112.0;
+const MARK_HEAD: f32 = 751.0;
+/// Cap height of the digits the sign stands beside. Same source.
+const DIGIT_HEAD: f32 = 704.0;
+/// How far the font hangs below the baseline, positive. From `hhea`.
+const DESCENDER: f32 = 265.0;
+
+/// Line height as a multiple of the font size.
 ///
-/// The sign is a *superior* mark in this face: its outline runs from 112 to 751 units up,
-/// where the digits run 0 to 704. That's deliberate — it's how `©` and `®` are
-/// conventionally set beside a wordmark, and SF Mono does the same — but in a line of
-/// running text it reads as a glyph floating above its neighbours.
-///
-/// Bevy's UI text has no baseline shift, so the sign is set as its own node and nudged
-/// down by exactly this much, which drops it onto the baseline at full size. Measured from
-/// the font's `glyf` table; recompute it if the face ever changes.
-const MARK_RAISE_EM: f32 = 0.112;
+/// 1.2 em is Bevy's default *and* exactly Fira Mono's ascender plus descender
+/// (935 + 265 = 1200), so there is no leading to reason about: the baseline sits
+/// `DESCENDER` above the bottom of the line box at any size. `MARK_NUDGE` depends on
+/// that, so it's pinned here rather than left to whatever the default happens to be.
+const LINE_HEIGHT_EM: f32 = 1.2;
 
 /// Fira Mono's advance width, in ems. It's monospaced, so this is every glyph's — which
 /// makes it the width of the space that would have sat between the sign and the year if
 /// they were still one string.
 const MONO_ADVANCE_EM: f32 = 0.6;
+
+/// Size the sign is set at, so that it stands exactly as tall as the digits. Its outline
+/// is `MARK_HEAD - MARK_FOOT` tall against their `DIGIT_HEAD`, so it needs scaling up.
+const MARK_SIZE: f32 = STUDIO_LINE_SIZE * DIGIT_HEAD / (MARK_HEAD - MARK_FOOT);
+
+/// How far down the sign moves for its foot to reach the words' baseline.
+///
+/// Two parts, and missing the second is what left the top misaligned. Its own outline
+/// starts `MARK_FOOT` above its baseline — and because the row aligns the two line boxes
+/// by their *bottoms* and the sign's box is now the taller of the two, its baseline also
+/// starts a descender's worth of the size difference above the words'.
+const MARK_NUDGE: f32 = (MARK_FOOT * MARK_SIZE + DESCENDER * (MARK_SIZE - STUDIO_LINE_SIZE)) / EM;
+
+/// How far right the sign shifts, in ems, purely by eye.
+///
+/// Unlike everything above this one is a judgement, not a measurement. The sign is a
+/// small ring in a wide monospaced cell, so the white space around it reads as a bigger
+/// gap than the same distance does between two letters, and it drifts away from the year
+/// it belongs to. Closing it up by a fifth of a character puts it back.
+const MARK_SHIFT_EM: f32 = 0.2;
 
 /// Everything spawned for the splash, so leaving it is one despawn.
 #[derive(Component)]
@@ -97,14 +140,18 @@ pub struct SplashClock {
     frames: u32,
 }
 
-/// The studio line's typeface, at the line's size. Both halves of the line have to agree
-/// on this or bottom-aligning them stops aligning their baselines.
-fn studio_face(assets: &AssetServer) -> TextFont {
-    TextFont {
-        font: FontSource::Handle(assets.load(STUDIO_FONT)),
-        font_size: FontSize::Px(STUDIO_LINE_SIZE),
-        ..default()
-    }
+/// The studio line's typeface at a given size, with the line height pinned alongside it —
+/// see [`LINE_HEIGHT_EM`], which [`MARK_NUDGE`] is derived from. `LineHeight` is its own
+/// component in Bevy 0.19 rather than a field of `TextFont`, hence the pair.
+fn studio_face(assets: &AssetServer, size: f32) -> (TextFont, LineHeight) {
+    (
+        TextFont {
+            font: FontSource::Handle(assets.load(STUDIO_FONT)),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        LineHeight::RelativeToFont(LINE_HEIGHT_EM),
+    )
 }
 
 pub fn enter_splash(
@@ -151,10 +198,9 @@ pub fn enter_splash(
                     ..default()
                 },
             ),
-            // The sign is a separate node from the words purely so it can be positioned by
-            // hand. Bottom-aligned rather than centred: both nodes are the same face at the
-            // same size, so their line boxes match and aligning the bottoms aligns the
-            // baselines. Then the sign alone gets nudged down onto that baseline.
+            // The sign is a separate node from the words purely so it can be sized and
+            // positioned by hand. The row aligns the two line boxes by their bottoms,
+            // which `MARK_NUDGE` accounts for.
             (
                 Node {
                     position_type: PositionType::Absolute,
@@ -168,12 +214,16 @@ pub fn enter_splash(
                     (
                         SplashMark,
                         Text::new("\u{00a9}"),
-                        studio_face(&assets),
+                        studio_face(&assets, MARK_SIZE),
                         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
                         // Visual only — `UiTransform` doesn't disturb the layout, so the
-                        // gap either side of the sign stays exactly one character wide.
+                        // gap either side of the sign stays exactly one character wide
+                        // however much the sign itself is scaled and shifted.
                         UiTransform {
-                            translation: Val2::px(0.0, STUDIO_LINE_SIZE * MARK_RAISE_EM),
+                            translation: Val2::px(
+                                STUDIO_LINE_SIZE * MARK_SHIFT_EM,
+                                MARK_NUDGE,
+                            ),
                             ..default()
                         },
                     ),
@@ -182,7 +232,7 @@ pub fn enter_splash(
                         Text::new(format!(
                             "{STUDIO_YEAR} Baz Studios, LLC. All rights reserved."
                         )),
-                        studio_face(&assets),
+                        studio_face(&assets, STUDIO_LINE_SIZE),
                         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
                     ),
                 ],
@@ -280,6 +330,28 @@ mod tests {
         assert_eq!(alpha_at(SPLASH_FADE + SPLASH_HOLD * 0.5), 1.0, "it should hold");
         assert!(alpha_at(life - 0.01) < 0.02, "it should end on black");
         assert_eq!(alpha_at(life + 5.0), 0.0, "and stay there");
+    }
+
+    /// The sign has to meet the digits at *both* ends. Getting the foot onto the baseline
+    /// and leaving the top short was the first attempt, and it read as plainly wrong.
+    ///
+    /// This is pure arithmetic on the font's metrics, so it needs no window — and it is
+    /// the whole reason those metrics are named constants rather than inlined numbers.
+    #[test]
+    fn the_copyright_sign_meets_the_digits_top_and_bottom() {
+        // Heights above the *words'* baseline, in pixels. The row aligns the two line
+        // boxes by their bottoms, and the baseline sits `DESCENDER` above the bottom of a
+        // box, so the taller box carries its baseline higher by this much.
+        let baseline_lift = DESCENDER * (MARK_SIZE - STUDIO_LINE_SIZE) / EM;
+        let foot = baseline_lift + MARK_FOOT * MARK_SIZE / EM - MARK_NUDGE;
+        let head = baseline_lift + MARK_HEAD * MARK_SIZE / EM - MARK_NUDGE;
+        let digit_head = DIGIT_HEAD * STUDIO_LINE_SIZE / EM;
+
+        assert!(foot.abs() < 0.001, "the sign's foot is {foot:.4}px off the baseline");
+        assert!(
+            (head - digit_head).abs() < 0.001,
+            "the sign tops out at {head:.4}px against the digits' {digit_head:.4}px",
+        );
     }
 
     /// A skip has to be continuous. Entering the out-fade at the brightness already on
