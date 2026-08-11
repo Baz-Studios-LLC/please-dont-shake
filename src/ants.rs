@@ -166,6 +166,10 @@ pub struct ColonyStats {
     pub falling: usize,
     pub panicking: usize,
     pub diggers: usize,
+    /// The rest of the job mix. Without these, "the ants aren't digging" cannot be told apart
+    /// from "those particular ants are nurses", and the two want opposite fixes.
+    pub nurses: usize,
+    pub surface: usize,
     /// Boxed in *this tick* — every direction refused. A handful is normal in a tight
     /// tunnel; a steady count is the signature of ants stuck on the spot.
     pub walled_in: usize,
@@ -516,12 +520,16 @@ fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2, from_y: f32) -> bool {
     let ceiling =
         (nav.surface_at(x) as f32 + SURFACE_ROAM).min(INITIAL_SURFACE as f32 + MOUND_HEADROOM);
 
-    // Coming *down* is always allowed, whatever the ceiling says, and that second clause is
-    // load-bearing. The ceiling is a limit on how high an ant will climb; read as a limit on
-    // where it may be, it strands anything already above it — an ant on top of a spoil mound
-    // that has grown past the cap has every target refused, including the ones that would
-    // get it out, so it stands on the summit forever. Which is exactly what it did.
-    pos.y <= ceiling || pos.y < from_y
+    // Above the ceiling, anything that isn't a *climb* is allowed — level included, and the
+    // "level" is the part that matters. The ceiling limits how high an ant will climb; read
+    // as a limit on where it may be, it strands whatever is already up there.
+    //
+    // Strictly-lower was not enough, and this is why: a tick's walk is about a fifth of a
+    // cell, so a step along flat ground leaves `pos.y` equal to where it started, not below
+    // it. An ant standing on ground above the cap therefore had every sideways step refused
+    // as well, and the only ones left pointed *into* the sand it was standing on. It could
+    // not move at all.
+    pos.y <= ceiling || pos.y <= from_y
 }
 
 pub fn update_ants(
@@ -538,6 +546,8 @@ pub fn update_ants(
     stats.falling = 0;
     stats.panicking = 0;
     stats.diggers = 0;
+    stats.nurses = 0;
+    stats.surface = 0;
     // Per tick, both of them, so they read as "how many right now" rather than a total that
     // only ever grows.
     stats.walled_in = 0;
@@ -601,8 +611,10 @@ pub fn update_ants(
         if panicking {
             stats.panicking += 1;
         }
-        if job == Job::Digger {
-            stats.diggers += 1;
+        match job {
+            Job::Digger => stats.diggers += 1,
+            Job::Nurse => stats.nurses += 1,
+            Job::Surface => stats.surface += 1,
         }
 
         let above_ground = ant.pos.y > nav.surface_at(ux) as f32 + 0.5;
@@ -832,14 +844,21 @@ fn step(
         }
     }
 
-    // Boxed in. Turn away and try again next tick — but not by exactly half a turn, which
-    // is what this did and is a trap: reversing an ant whose reverse is also blocked flips
-    // it back next tick, and it vibrates on the spot for ever. Landing somewhere *near* the
-    // reverse, by an amount that depends on where it is, means the same ant tries a
-    // different way out each tick until one works.
+    // Boxed in. Turn away and try again next tick.
+    //
+    // Keyed on the **tick**, and that is the whole subtlety. Reversing exactly flips an ant
+    // whose reverse is also blocked straight back, and it vibrates on the spot. Reversing
+    // plus an offset taken from its *position* looks like a fix and isn't: a stuck ant's
+    // position doesn't change, so the offset doesn't either, and the heading precesses by
+    // the same angle every tick — a stuck ant spins on the spot instead, which is worse
+    // because it looks deliberate. Brett watched them do it.
+    //
+    // From the tick, the turn is different every frame, so a boxed-in ant sweeps for a way
+    // out instead of orbiting.
     stats.walled_in += 1;
-    let nudge = (hash01(ant.pos.x.abs() as u32, ant.pos.y.abs() as u32, 0x57AC7) - 0.5) * 1.6;
-    ant.heading = Vec2::from_angle(ant.heading.to_angle() + std::f32::consts::PI + nudge);
+    let sweep = hash01(ant.pos.x.abs() as u32, ant.pos.y.abs() as u32, grid.tick)
+        * std::f32::consts::TAU;
+    ant.heading = Vec2::from_angle(sweep);
 }
 
 /// Put the grain down outside. The sand simulation takes it from here, which is how the
@@ -942,10 +961,21 @@ fn escape_burial(
 }
 
 /// Push each ant's simulated position into its transform.
+/// How fast a body turns to face where it is going, in radians per second of catching up.
+///
+/// The heading is a decision, remade every tick out of a blend of influences, and it is
+/// perfectly reasonable for it to jump: an ant sliding along a slope tries one deflection then
+/// another, and a boxed-in one sweeps for a way out. Drawing that raw put the body wherever
+/// the last decision pointed, so an ant climbing a 45-degree pile appeared to flip over and
+/// over. What it faces is a *rendering* of that decision, and it catches up.
+const TURN_RATE: f32 = 11.0;
+
 pub fn sync_ant_transforms(
+    time: Res<Time>,
     assets: Res<AntAssets>,
     mut ants: Query<(&Ant, &mut Transform, &mut MeshMaterial3d<StandardMaterial>, Has<Queen>)>,
 ) {
+    let catch_up = 1.0 - (-TURN_RATE * time.delta_secs().max(1.0 / 240.0)).exp();
     for (ant, mut tf, mut mat, is_queen) in &mut ants {
         let mut p = SandGrid::cell_to_world(0, 0);
         p.x = (ant.pos.x - GRID_W as f32 * 0.5) * CELL;
@@ -953,7 +983,10 @@ pub fn sync_ant_transforms(
         p.z = ant.z;
 
         tf.translation = p;
-        tf.rotation = Quat::from_rotation_z(ant.heading.to_angle());
+        // Toward the heading, never straight onto it. Slerp takes the short way round, so a
+        // reversal turns through one side rather than spinning.
+        let facing = Quat::from_rotation_z(ant.heading.to_angle());
+        tf.rotation = tf.rotation.slerp(facing, catch_up);
         tf.scale = if is_queen { Vec3::splat(2.3) } else { Vec3::ONE };
 
         if !is_queen {

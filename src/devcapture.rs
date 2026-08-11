@@ -743,8 +743,8 @@ fn shoot_colony(
     );
     // The two locomotion faults, measured rather than watched for. Both should read zero.
     info!(
-        "    stuck now {} | at the glass {}",
-        stats.walled_in, stats.at_the_glass
+        "    stuck now {} | at the glass {} | jobs: {} nurses, {} diggers, {} surface",
+        stats.walled_in, stats.at_the_glass, stats.nurses, stats.diggers, stats.surface
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",
