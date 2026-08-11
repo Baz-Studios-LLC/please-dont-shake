@@ -743,7 +743,11 @@ mod tests {
             .init_resource::<crate::ants::ColonyStep>()
             .init_resource::<crate::brood::BroodStats>()
             .init_resource::<crate::brood::LayClock>()
-            .init_resource::<crate::settings::Settings>()
+            // Opting in, because growing while closed is off by default — see `Settings`.
+            .insert_resource(crate::settings::Settings {
+                away: true,
+                ..Default::default()
+            })
             .add_systems(
                 Startup,
                 (load_farm, crate::away::catch_up_while_away).chain(),

@@ -54,6 +54,9 @@ const PRESS_RELEASE: f32 = 11.0;
 const GRAB_EASE: f32 = 18.0;
 const SETTLE: f32 = 7.0;
 
+/// Radians per second of the idle finger ripple. Was `elapsed * 1.1`; see `HandRig::ripple`.
+const RIPPLE_RATE: f32 = 1.1;
+
 /// How fast the hand converges on the cursor. Deliberately not instant — a hand that
 /// tracked rigidly would read as a dragged icon — but fast enough that it never feels
 /// like it missed.
@@ -107,6 +110,15 @@ pub struct HandRig {
     /// Smoothed lean from the hand's own motion, `(roll, pitch)`. More than any idle loop,
     /// this is what makes the hand read as suspended rather than pinned.
     bank: Vec2,
+    /// Phase of the idle ripple, in radians, wrapped every turn.
+    ///
+    /// Kept here rather than read off `Time::elapsed_secs`, because this game is meant to be
+    /// left running for days on a second monitor and that is long enough to break a single
+    /// float. At ten days of uptime `elapsed_secs` is 864000, where one float step is 0.06 —
+    /// larger than the 0.018 the phase advances per frame. The addition rounds home and the
+    /// hand's breathing stops dead, exactly the way the colony clock did at four days. Wrapping
+    /// each turn keeps the number small enough that it never happens.
+    ripple: f32,
 }
 
 pub fn setup_hand(
@@ -264,6 +276,7 @@ pub fn setup_hand(
         press: 0.0,
         grab: 0.0,
         bank: Vec2::ZERO,
+        ripple: 0.0,
     });
 }
 
@@ -352,15 +365,17 @@ pub fn move_hand(
     transform.rotation = rotation;
     transform.scale = Vec3::splat(HAND_SCALE);
 
-    pose_fingers(rig, &mut joints, time.elapsed_secs());
+    rig.ripple = (rig.ripple + dt * RIPPLE_RATE).rem_euclid(std::f32::consts::TAU);
+    pose_fingers(rig, &mut joints);
 }
 
 /// Curl, splay and ripple. One pass over the joints.
-fn pose_fingers(rig: &HandRig, joints: &mut Query<&mut Transform, Without<HandModel>>, t: f32) {
+fn pose_fingers(rig: &HandRig, joints: &mut Query<&mut Transform, Without<HandModel>>) {
     let splay = rig.grab;
+    let t = rig.ripple;
     for (index, [proximal, distal]) in rig.fingers.iter().enumerate() {
         // An idle ripple, so even a still hand breathes. Gone once it's holding on.
-        let ripple = (t * 1.1 + index as f32 * 1.5).sin() * 0.09 * (1.0 - splay);
+        let ripple = (t + index as f32 * 1.5).sin() * 0.09 * (1.0 - splay);
 
         // The index reaches out straight and presses; the others stay folded behind it,
         // which is what makes the gesture read as one finger rather than a paw.

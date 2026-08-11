@@ -68,9 +68,10 @@ pub fn catch_up_while_away(world: &mut World) {
         return;
     }
 
-    // The player's call, and the reason it is a setting: a farm that ages while you're gone is
-    // the honest version of a real-time clock, and it also means a fortnight away turns the
-    // whole workforce over without you. Off, and the tank waits.
+    // Off by default, and the reason is the concept rather than the code: this is meant to be
+    // left running on a second monitor, so the game has the days it needs and everything the
+    // player comes back to is something that actually happened in front of them. On, for
+    // whoever would rather close the app and not lose the week.
     if !world.resource::<Settings>().away {
         info!("{owed:.1} colony-days passed, and the farm was left waiting");
         return;

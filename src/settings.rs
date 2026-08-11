@@ -43,10 +43,14 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        // Growing while away is on by default, because it is what the real-time clock means.
-        // A colony day takes a day, so a farm that only aged while it was being watched would
-        // take a hundred and forty-four hours of play to hatch one egg.
-        Self { fullscreen: false, music: 3, shake: 1, skin: 1, away: true }
+        // Growing while closed is **off**.
+        //
+        // The intended use is a window left open on a second monitor, the way people leave
+        // Cookie Clicker open — so the hundred and forty-four hours of uptime that an egg needs
+        // is time the game genuinely has, and real time without a catch-up is the truthful
+        // version: everything you come back to actually happened while the tank was there. The
+        // setting stays for people who close the app and would rather not lose the week.
+        Self { fullscreen: false, music: 3, shake: 1, skin: 1, away: false }
     }
 }
 
@@ -225,7 +229,7 @@ const ROWS: [(usize, Control, &str, &str); 5] = [
         "Grow while closed",
         // One line at this width. A hint that wraps costs a row of height on the tallest tab,
         // which is the tab that decides how tall the window has to be.
-        "The colony keeps living while the game is closed. Nothing digs.",
+        "Also live while the game is closed. Off means the tank waits for you.",
     ),
 ];
 
