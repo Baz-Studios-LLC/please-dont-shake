@@ -29,21 +29,21 @@ has all of it and holds tunnels. See DESIGN.md for why one threshold can't do bo
 unit tests in `src/sand.rs` hold the two halves apart; run them before believing anything
 about a pile.
 
-**M2 (the colony) works end to end but isn't finished.** Ants dig from flat sand, haul
-spoil, and mass stays exact across all three places a grain can hide — grid, particle,
-mandibles. What's still wrong is the *rate*: net excavated volume grows more slowly than
-the excavation count implies, because some spoil still gets redeposited.
+**M2 (the colony) works.** Ants dig from flat sand, haul spoil, and mass stays exact across
+all three places a grain can hide — grid, particle, mandibles.
 
-Measured at 100s with 22 ants, on flat sand:
+The hauling rate is *not* the problem the earlier notes claimed. Measured with the mound
+counted as well as the hole (2026-08-11, 22 ants, 100s of flat sand):
 
-| | digs | net excavated | efficiency |
-|---|---|---|---|
-| spoil held in place by an agitation blast | 231 | 87 | 38% |
-| loose spoil, no clearance rule | 231 | 87 | 38% |
-| loose spoil + mouth clearance + outbound hauling | 176 | 118 | **67%** |
+| | dug | excavated | mound | returned |
+|---|---|---|---|---|
+| | 190 | 168 | 164 | 18 (9%) |
 
-The remaining third is still worth chasing, but the shape is right now: there is a shaft
-with a crater rim around it, which is what a *Lasius* entrance looks like.
+`excavated ≈ mound` at every stage is the signature of a healthy dig: what comes out of the
+ground is sitting in the heap. The earlier "67% efficiency" was one run, read without the
+mound, and it was misleading twice over — it counted spoil that was fine, and the harness
+drives on real frame times so run-to-run variance is large. **Always read excavated and
+mound together, and don't conclude anything from a single run.**
 
 **Persistence is done.** One farm, saved automatically — no button, no slots. Written on
 leaving play, on quitting, and every 30s in between; restored at startup before the title

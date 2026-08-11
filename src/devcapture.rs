@@ -387,6 +387,24 @@ pub fn excavated_volume(grid: &SandGrid) -> usize {
     n
 }
 
+/// Sand piled *above* the original fill line — the spoil heap.
+///
+/// Measured because "excavated" alone can't say where a missing cell went. Every grain the
+/// colony digs out is either still in the mound, back in the hole, or in a mandible, and
+/// only the first is progress. Mound plus excavated should track the dig count; when it
+/// doesn't, spoil is coming back in and the difference is how much.
+pub fn mound_volume(grid: &SandGrid) -> usize {
+    let mut n = 0;
+    for y in INITIAL_SURFACE..GRID_H {
+        for x in 0..GRID_W {
+            if grid.get(x, y).mat == Substance::Sand {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 #[derive(Resource)]
 pub struct DevCapture {
     pub t: f32,
@@ -710,9 +728,18 @@ fn shoot_colony(
     // check silently passes while the farm leaks.
     let sand = grid.sand_count() + off_grid;
     let drift = sand as i64 - cap.baseline_sand as i64;
+    let excavated = excavated_volume(grid);
+    let mound = mound_volume(grid);
     info!(
-        "{name}: excavated {} cells | {alive} ants, {carried} hauling | sand {sand} (drift {drift:+})",
-        excavated_volume(grid)
+        "{name}: excavated {excavated} | mound {mound} | {alive} ants, {carried} hauling | sand {sand} (drift {drift:+})",
+    );
+    // Where the digging actually went. `dug` grains left the ground; each one is now in the
+    // mound, back in the hole, or in a mandible. `returned` is the leak.
+    let returned = stats.dug as i64 - excavated as i64 - carried as i64;
+    info!(
+        "    dug {} -> excavated {excavated}, returned {returned} ({}%) | mound holds {mound}",
+        stats.dug,
+        if stats.dug > 0 { returned * 100 / stats.dug as i64 } else { 0 },
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",
