@@ -1,0 +1,65 @@
+# Please Don't Shake's palette, lent to Ordo.
+#
+# Ordo names the roles; this file says what colour they are. Edit it while the
+# game is running — that's the point of it. A key Ordo doesn't know is a hard
+# error rather than a shrug.
+#
+# Everything here is drawn off the one object the game already has an opinion
+# about: the hand-lettered sticker on the glass. Warm paper, red marker, and the
+# golden-hour light coming through a kid's bedroom window behind the tank.
+
+[color]
+# Aged label paper, near opaque — a lit room bleeding through a panel is what
+# makes long dim text unreadable.
+panel_bg      = { srgb = [0.118, 0.098, 0.082], alpha = 0.965 }
+title_bg      = { srgb = [0.152, 0.126, 0.104], alpha = 0.975 }
+card_bg       = { srgb = [0.098, 0.082, 0.070] }
+
+# A modal's dimmer. Deliberately translucent, unlike panel_bg — the farm behind
+# is the thing worth looking at and a scrim that hid it would defeat itself.
+scrim         = { srgb = [0.055, 0.040, 0.030], alpha = 0.640 }
+
+# Paper white, and the same ink one step back.
+ink           = { srgb = [0.925, 0.898, 0.845] }
+ink_dim       = { srgb = [0.520, 0.478, 0.430] }
+
+# The marker on the sticker. This is the game's one loud colour and it is only
+# ever used to mean "this is the thing".
+accent        = { srgb = [0.792, 0.118, 0.106] }
+
+card_border   = { srgb = [0.330, 0.268, 0.212], alpha = 0.620 }
+panel_border  = { srgb = [0.392, 0.312, 0.240], alpha = 0.480 }
+
+# Wood, like the tank's frame.
+button_idle   = { srgb = [0.148, 0.108, 0.078] }
+button_hover  = { srgb = [0.242, 0.176, 0.122] }
+button_pressed = { srgb = [0.330, 0.238, 0.160] }
+
+# No [font] section on purpose.
+#
+# A generic family needs Bevy's `system_font_discovery` feature, and without it
+# text silently fails to render at all — which is a worse bug than plain type,
+# and one this project has already chased twice. Naming nothing leaves Bevy's
+# embedded default in place, which is what a game with no opinion about type
+# wants. When the sticker's hand-lettered face gets digitised it ships as a file
+# and goes on `display` as a `path`.
+
+[metric]
+title_size  = 22.0
+body_size   = 19.0
+small_size  = 15.0
+
+pad         = 14.0
+gap         = 7.0
+margin      = 18.0
+label_width = 104.0
+row_height  = 26.0
+
+border      = 1.0
+radius      = 4.0
+
+# The radial menu you stock the farm with. Generous, because it is driven by a
+# flick rather than by aiming — and a dead zone big enough that opening the menu
+# never commits to whichever way the hand drifted on the way down.
+radial_radius    = 92.0
+radial_dead_zone = 30.0

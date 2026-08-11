@@ -18,6 +18,7 @@
 //! without redesign: hold a finger on the glass, flick, lift.
 
 use bevy::prelude::*;
+use ordo::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StockItem {
@@ -110,26 +111,6 @@ pub struct RadialMenu {
 #[derive(Resource, Default)]
 pub struct PlacementQueue(pub Vec<(StockItem, Vec2)>);
 
-/// Screen-space radius the wedges sit at, and the dead zone in the middle where nothing
-/// is selected yet — so opening the menu doesn't instantly commit to whatever direction
-/// your hand drifted.
-pub const WEDGE_RADIUS: f32 = 84.0;
-pub const DEAD_ZONE: f32 = 26.0;
-
-/// Which wedge a cursor offset points at. Screen space, so `y` grows downward.
-pub fn wedge_at(offset: Vec2) -> Option<usize> {
-    if offset.length() < DEAD_ZONE {
-        return None;
-    }
-    Some(if offset.x.abs() > offset.y.abs() {
-        if offset.x > 0.0 { 1 } else { 3 }
-    } else if offset.y > 0.0 {
-        2
-    } else {
-        0
-    })
-}
-
 pub fn commit_selection(
     menu: &RadialMenu,
     stock: &mut Stock,
@@ -148,93 +129,54 @@ pub fn commit_selection(
 // Presentation
 // ---------------------------------------------------------------------------
 
+/// Marks the spawned hub so the gesture can find it again to despawn it.
 #[derive(Component)]
-pub struct RadialUi;
+pub struct OpenMenu;
 
-#[derive(Component)]
-pub struct RadialItem(pub usize);
-
-const IDLE: Color = Color::srgba(0.90, 0.88, 0.83, 0.72);
-const PICKED: Color = Color::srgb(1.0, 0.97, 0.90);
-const SPENT: Color = Color::srgba(0.62, 0.60, 0.57, 0.35);
-
-/// Spawn and despawn the menu's UI to follow the gesture, and keep the highlight in step
-/// with where the hand is pointing.
+/// Spawn and despawn the menu to follow the gesture, and keep the hub's selection
+/// in step with where the hand is pointing.
+///
+/// Ordo owns everything below this: where the wedges sit, which one an offset
+/// points at, and what colour each ends up. All that's left here is *when* the
+/// menu exists and *what's on it*, which is the part that's actually about ants.
 pub fn sync_radial_ui(
     mut commands: Commands,
     menu: Res<RadialMenu>,
     stock: Res<Stock>,
-    existing: Query<Entity, With<RadialUi>>,
-    mut items: Query<(&RadialItem, &mut TextColor)>,
+    open: Query<(Entity, &mut Radial), With<OpenMenu>>,
 ) {
-    let shown = existing.iter().next();
+    let mut open = open;
 
-    match (menu.open, shown) {
-        (false, Some(root)) => {
-            commands.entity(root).despawn();
+    match (menu.open, open.iter_mut().next()) {
+        (false, Some((entity, _))) => {
+            commands.entity(entity).despawn();
         }
-        (true, None) => spawn_radial(&mut commands, &menu, &stock),
-        (true, Some(_)) => {
-            for (item, mut colour) in &mut items {
-                colour.0 = wedge_colour(WEDGES[item.0], &stock, menu.selected == Some(item.0));
+        (true, Some((_, mut hub))) => {
+            if hub.selected != menu.selected {
+                hub.selected = menu.selected;
+            }
+        }
+        (true, None) => {
+            let hub = commands
+                .spawn((OpenMenu, radial(menu.origin, WEDGES.len()), Radial {
+                    count: WEDGES.len(),
+                    selected: menu.selected,
+                }))
+                .id();
+
+            for (i, item) in WEDGES.iter().enumerate() {
+                // The count rides in the label, so you can see what's left without
+                // a separate inventory panel to read.
+                let label = match stock.remaining(*item) {
+                    Some(n) => format!("{} {}", item.label(), n),
+                    None => item.label().to_string(),
+                };
+                let mut spoke = commands.spawn((wedge(i, &label), ChildOf(hub)));
+                if !stock.available(*item) {
+                    spoke.insert(Spent);
+                }
             }
         }
         (false, None) => {}
-    }
-}
-
-fn wedge_colour(item: StockItem, stock: &Stock, selected: bool) -> Color {
-    if !stock.available(item) {
-        SPENT
-    } else if selected {
-        PICKED
-    } else {
-        IDLE
-    }
-}
-
-fn spawn_radial(commands: &mut Commands, menu: &RadialMenu, stock: &Stock) {
-    // Offsets match WEDGES: up, right, down, left.
-    const DIRS: [Vec2; 4] = [
-        Vec2::new(0.0, -1.0),
-        Vec2::new(1.0, 0.0),
-        Vec2::new(0.0, 1.0),
-        Vec2::new(-1.0, 0.0),
-    ];
-
-    let root = commands
-        .spawn((
-            RadialUi,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(menu.origin.x),
-                top: px(menu.origin.y),
-                ..default()
-            },
-        ))
-        .id();
-
-    for (i, dir) in DIRS.iter().enumerate() {
-        let item = WEDGES[i];
-        let label = match stock.remaining(item) {
-            Some(n) => format!("{} {}", item.label(), n),
-            None => item.label().to_string(),
-        };
-        let offset = *dir * WEDGE_RADIUS;
-
-        commands.spawn((
-            RadialItem(i),
-            ChildOf(root),
-            Node {
-                position_type: PositionType::Absolute,
-                // Nudged so each label sits roughly centred on its point.
-                left: px(offset.x - 34.0),
-                top: px(offset.y - 10.0),
-                ..default()
-            },
-            Text::new(label),
-            TextFont { font_size: FontSize::Px(17.0), ..default() },
-            TextColor(wedge_colour(item, stock, menu.selected == Some(i))),
-        ));
     }
 }

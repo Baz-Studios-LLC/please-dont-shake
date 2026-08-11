@@ -10,9 +10,11 @@
 
 use crate::grid::*;
 use crate::pheromones::{Ph, Pheromones};
-use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection, wedge_at};
+use crate::radial::WEDGES;
+use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection};
 use crate::tank::{CAM_DIST, TankRoot, TankSpring};
 use bevy::prelude::*;
+use ordo::prelude::*;
 
 /// Pointer travel, in pixels, below which a click counts as a tap rather than a shake.
 const TAP_SLOP_PX: f32 = 6.0;
@@ -102,6 +104,7 @@ pub fn pointer_input(
     mut menu: ResMut<RadialMenu>,
     mut stock: ResMut<Stock>,
     mut placements: ResMut<PlacementQueue>,
+    theme: Res<Theme>,
 ) {
     let (camera, cam_tf) = *camera;
     let tank_tf = *tank;
@@ -140,7 +143,9 @@ pub fn pointer_input(
         state.held += dt;
 
         if menu.open {
-            menu.selected = wedge_at(cursor - menu.origin);
+            // Ordo owns the geometry, so picking and drawing can never disagree.
+            menu.selected = Radial::new(WEDGES.len())
+                .pick(cursor - menu.origin, theme.metric(Metric::RadialDeadZone));
         } else if state.drag_px < TAP_SLOP_PX
             && state.held >= HOLD_TO_OPEN
             && let Some(cell) = state.press_cell

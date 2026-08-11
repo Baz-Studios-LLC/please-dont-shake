@@ -124,7 +124,11 @@ fn main() {
             OnEnter(GameState::Playing),
             found_colony.run_if(devcapture::colony_enabled),
         )
-        .add_systems(OnEnter(GameState::Title), title::enter_title)
+        .add_plugins(ordo::OrdoPlugin::with_theme("theme.ordo.toml"))
+        .add_systems(
+            OnEnter(GameState::Title),
+            (title::enter_title, title::dress_menu).chain(),
+        )
         .add_systems(OnExit(GameState::Title), title::exit_title)
         .add_systems(Update, title::title_menu.run_if(in_state(GameState::Title)))
         .add_systems(
