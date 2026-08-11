@@ -3,7 +3,7 @@
 The top section of this file becomes the release notes, and the launcher shows it as
 "What's New" — so it's written for whoever is about to play, not for whoever wrote it.
 
-## Unreleased
+## v0.1.0
 
 First light. The farm exists, the sand behaves, and the colony digs its own tunnels.
 
