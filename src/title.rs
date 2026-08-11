@@ -16,6 +16,7 @@
 use bevy::math::Rot2;
 use bevy::prelude::*;
 use bevy::ui::UiTransform;
+use bevy::ui_widgets::Activate;
 use ordo::prelude::*;
 
 #[derive(States, Default, Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -102,14 +103,22 @@ pub fn exit_title(mut commands: Commands, ui: Query<Entity, With<TitleUi>>) {
 
 /// Hover and press colours are Ordo's job. This only has to decide what a click
 /// *means*, and refuse the two entries that don't mean anything yet.
-pub fn title_menu(
-    actions: Query<(&Interaction, &MenuAction), Changed<Interaction>>,
+///
+/// Listens for `Activate` rather than polling `Interaction`. Ordo's buttons are
+/// `bevy_ui_widgets::Button`, which carries no `Interaction` component at all — so
+/// a query for one matches nothing and the button appears to work (it lights up on
+/// hover, because that's painted from `Hovered`) while doing nothing at all when
+/// clicked. `Activate` is also the better signal: it fires for Enter and Space
+/// while focused, not just for a pointer.
+pub fn on_menu_activate(
+    activate: On<Activate>,
+    actions: Query<&MenuAction>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, action) in &actions {
-        if *interaction == Interaction::Pressed && action.enabled() {
-            next.set(GameState::Playing);
-        }
+    if let Ok(action) = actions.get(activate.entity)
+        && action.enabled()
+    {
+        next.set(GameState::Playing);
     }
 }
 

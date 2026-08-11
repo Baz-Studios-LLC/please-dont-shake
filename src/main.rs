@@ -130,7 +130,6 @@ fn main() {
             (title::enter_title, title::dress_menu).chain(),
         )
         .add_systems(OnExit(GameState::Title), title::exit_title)
-        .add_systems(Update, title::title_menu.run_if(in_state(GameState::Title)))
         .add_systems(
             FixedUpdate,
             (
@@ -158,6 +157,7 @@ fn main() {
             )
                 .chain(),
         )
+        .add_observer(title::on_menu_activate)
         .add_systems(Update, devcapture::screenshot_hotkey);
 
     // State registration has to come *after* DefaultPlugins, which is what brings
