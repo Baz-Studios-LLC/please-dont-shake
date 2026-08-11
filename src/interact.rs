@@ -153,6 +153,7 @@ pub fn pointer_input(
     mut placements: ResMut<PlacementQueue>,
     theme: Res<Theme>,
     mut grains: ResMut<GrainSpawnQueue>,
+    settings: Res<crate::settings::Settings>,
 ) {
     let (camera, cam_tf) = *camera;
     let tank_tf = *tank;
@@ -219,7 +220,7 @@ pub fn pointer_input(
             spring.vel = d_world / dt;
             spring.tilt_vel -= d_world.x * TILT_FROM_DRAG;
 
-            apply_shake_agitation(&mut grid, &mut ph, spring.vel.length(), dt);
+            apply_shake_agitation(&mut grid, &mut ph, spring.vel.length(), dt, settings.shake_scale());
         }
         state.last_cursor = Some(cursor);
     }
@@ -247,9 +248,14 @@ pub fn apply_shake_agitation(
     ph: &mut Pheromones,
     speed: f32,
     dt: f32,
+    sensitivity: f32,
 ) {
     if speed > SHAKE_DEADZONE {
-        let rate = ((speed - SHAKE_DEADZONE) * SHAKE_TO_AGITATION).min(SHAKE_AGITATION_MAX_RATE);
+        // Sensitivity scales what a given hand speed *means*, before the ceiling. Applied
+        // here rather than to the ceiling as well, so turning it up shakes harder for the
+        // same gesture without raising how bad a full-strength shake can get.
+        let rate = ((speed - SHAKE_DEADZONE) * SHAKE_TO_AGITATION * sensitivity)
+            .min(SHAKE_AGITATION_MAX_RATE);
         grid.agitate_all(rate * dt);
         // The shake lands on the colony's nervous system, not just its architecture.
         // Alarm floods every cell at once and then calms chemically over a minute or so.

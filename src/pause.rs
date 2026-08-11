@@ -25,11 +25,10 @@ pub enum PauseAction {
 }
 
 impl PauseAction {
-    /// Settings has nothing behind it yet, same as on the title screen. Shown dimmed
-    /// rather than hidden: a menu whose shape changes as features land is worse than one
-    /// with a quiet entry in it.
+    /// Every entry does something now that Settings has a window behind it. The dimming
+    /// machinery stays because it is one line and the next unfinished entry will want it.
     fn enabled(self) -> bool {
-        !matches!(self, PauseAction::Settings)
+        true
     }
 }
 
@@ -117,6 +116,7 @@ pub fn on_pause_activate(
     actions: Query<&PauseAction>,
     mut menu: ResMut<PauseMenu>,
     mut next: ResMut<NextState<GameState>>,
+    mut settings: ResMut<crate::settings::SettingsWindow>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Ok(action) = actions.get(activate.entity) else {
@@ -135,7 +135,9 @@ pub fn on_pause_activate(
         PauseAction::Exit => {
             exit.write(AppExit::Success);
         }
-        PauseAction::Settings => {}
+        // Opened over the Esc menu rather than instead of it, so closing it puts you back
+        // where you were rather than into the farm.
+        PauseAction::Settings => settings.open = true,
     }
 }
 

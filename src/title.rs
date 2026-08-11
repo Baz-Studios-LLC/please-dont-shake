@@ -50,16 +50,16 @@ pub enum MenuAction {
 }
 
 impl MenuAction {
-    /// Nothing sits behind Settings yet — there's nothing to set. It's shown
-    /// dimmed rather than hidden, because a menu that changes shape as features
-    /// land is worse than one with a quiet entry in it.
+    /// Continue is *absent* rather than dimmed when there is nothing to continue.
+    /// It isn't an unfinished feature, it's a statement about the farm: on a first
+    /// run there is no game to go back to, and a greyed-out Continue would be
+    /// claiming otherwise.
     ///
-    /// Continue is a different case and is *absent* rather than dimmed when there
-    /// is nothing to continue. It isn't an unfinished feature, it's a statement
-    /// about the farm: on a first run there is no game to go back to, and a
-    /// greyed-out Continue would be claiming otherwise.
+    /// Every entry that is shown now does something, so nothing is dimmed. The
+    /// dimming machinery stays because it is one line and the next unfinished
+    /// entry will want it.
     fn enabled(self) -> bool {
-        !matches!(self, MenuAction::Settings)
+        true
     }
 }
 
@@ -172,6 +172,13 @@ pub fn on_menu_activate(
         return;
     }
 
+    // Settings opens over whatever is behind it and doesn't leave the title screen,
+    // so it never starts the fade.
+    if *action == MenuAction::Settings {
+        commands.run_system_cached(open_settings);
+        return;
+    }
+
     // New Game throws the old farm away *now*, so what the fade uncovers is a
     // fresh tank rather than the previous colony blinking out a moment later.
     // The file goes with it: without that, starting over and then closing the app
@@ -181,6 +188,12 @@ pub fn on_menu_activate(
         crate::save::forget_farm();
     }
     commands.init_resource::<TitleFade>();
+}
+
+/// Raise the settings window. A cached one-shot so the observer doesn't have to hold a
+/// `ResMut` it only wants on one branch out of three.
+fn open_settings(mut window: ResMut<crate::settings::SettingsWindow>) {
+    window.open = true;
 }
 
 /// Takes the menu away and hands over to the farm.

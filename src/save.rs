@@ -57,7 +57,7 @@ const FORMAT: u32 = 1;
 /// Same shape as Divus Factus's, so everything the studio ships is findable in the same
 /// place — though nothing here is shared with it, since that game keeps numbered slots a
 /// player picks between and this one keeps a single farm nobody has to think about.
-fn save_dir() -> std::path::PathBuf {
+pub(crate) fn save_dir() -> std::path::PathBuf {
     // An override, so a harness run can be pointed somewhere harmless. The capture modes
     // don't load or save at all, but a game that can only ever write to one absolute path
     // is a game you can't test without risking somebody's farm.

@@ -98,6 +98,65 @@ pub fn hand_shot() -> bool {
     std::env::args().any(|a| a == "--hand-shot")
 }
 
+/// `--settings-shot` opens the settings window and photographs each tab.
+///
+/// Tabs are the one piece of chrome where "it built" and "it works" are different claims:
+/// a strip that never switches looks identical in a single frame to one that does.
+pub fn settings_shot() -> bool {
+    std::env::args().any(|a| a == "--settings-shot")
+}
+
+const SETTINGS_SHOTS: [(f32, &str); 3] = [
+    (1.4, "settings-1-video"),
+    (2.4, "settings-2-audio"),
+    (3.4, "settings-3-gameplay"),
+];
+
+pub fn run_settings_shot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut window: ResMut<crate::settings::SettingsWindow>,
+    mut strips: Query<&mut ordo::tabs::Tabs>,
+    settings: Res<crate::settings::Settings>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+    let crossed = |at: f32| prev < at && cap.t >= at;
+
+    if crossed(1.0) {
+        window.open = true;
+    }
+    // Straight at the strip rather than through a synthetic click: what is being checked is
+    // that a moved selection swaps the panes, not that Ordo's buttons report presses.
+    if crossed(2.0) {
+        for mut strip in &mut strips {
+            strip.selected = 1;
+        }
+    }
+    if crossed(3.0) {
+        for mut strip in &mut strips {
+            strip.selected = 2;
+        }
+        info!(
+            "settings: fullscreen {} | music {} | shake {}",
+            settings.fullscreen, settings.music, settings.shake
+        );
+    }
+
+    for (at, name) in SETTINGS_SHOTS {
+        if crossed(at) {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(format!("{}/{name}.png", cap.out_dir)));
+        }
+    }
+    if crossed(4.2) {
+        exit.write(AppExit::Success);
+    }
+}
+
 /// Where the hand is put, in window pixels: over the sand, left of centre so the poses have
 /// room to be seen against a plain stretch of strata.
 const HAND_AT: Vec2 = Vec2::new(520.0, 470.0);
@@ -431,7 +490,15 @@ pub fn run_capture(
             spring.vel.x = phase.cos() * amp * freq;
             spring.tilt_vel -= phase.cos() * amp * 4.0 * time.delta_secs() * 60.0;
             // Same path the pointer takes, so this tests the real tuning.
-            crate::interact::apply_shake_agitation(&mut grid, &mut ph, spring.vel.length(), time.delta_secs());
+            // 1.0: the harness always shakes at the sensitivity every recorded number was
+            // measured against, whatever the player's setting happens to be.
+            crate::interact::apply_shake_agitation(
+                &mut grid,
+                &mut ph,
+                spring.vel.length(),
+                time.delta_secs(),
+                1.0,
+            );
         }
     }
 
@@ -581,11 +648,14 @@ pub fn run_colony_capture(
         spring.offset.x = phase.sin() * amp;
         spring.vel.x = phase.cos() * amp * freq;
         spring.tilt_vel -= phase.cos() * amp * 4.0 * time.delta_secs() * 60.0;
+        // 1.0: the harness always shakes at the sensitivity every recorded number was
+        // measured against, whatever the player's setting happens to be.
         crate::interact::apply_shake_agitation(
             &mut grid,
             &mut ph,
             spring.vel.length(),
             time.delta_secs(),
+            1.0,
         );
     }
 

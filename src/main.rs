@@ -32,6 +32,7 @@ mod pause;
 mod radial;
 mod sand;
 mod save;
+mod settings;
 mod splash;
 mod tank;
 mod title;
@@ -127,6 +128,8 @@ fn main() {
         .init_resource::<ants::KitPour>()
         .init_resource::<farm::GameInProgress>()
         .init_resource::<hand::Touch>()
+        .init_resource::<settings::Settings>()
+        .init_resource::<settings::SettingsWindow>()
         .add_systems(
             Startup,
             (
@@ -200,6 +203,22 @@ fn main() {
         )
         .add_observer(title::on_menu_activate)
         .add_observer(pause::on_pause_activate)
+        .add_observer(settings::on_control_activate)
+        // Settings are read before the first frame and written on every change. They are
+        // applied by *watching* the resource rather than by being pushed from the click, so
+        // a value restored from disk lands by exactly the same road as one just cycled.
+        .add_systems(PreStartup, settings::load_settings)
+        .add_systems(
+            Update,
+            (
+                settings::sync_settings_ui,
+                settings::size_settings_ui,
+                settings::refresh_readings,
+                settings::apply_settings,
+                settings::save_settings,
+            )
+                .chain(),
+        )
         // The farm keeps running behind the Esc menu on purpose — an ambient game whose
         // colony froze whenever you opened a menu would be lying about what it is.
         .add_systems(
@@ -247,7 +266,8 @@ fn main() {
     let ui_shot = devcapture::title_shot()
         || devcapture::splash_shot()
         || devcapture::wheel_shot()
-        || devcapture::hand_shot();
+        || devcapture::hand_shot()
+        || devcapture::settings_shot();
     let shell_shot = devcapture::title_shot() || devcapture::splash_shot();
     if devcapture::capture_mode() && !shell_shot {
         app.insert_state(GameState::Playing);
@@ -268,7 +288,9 @@ fn main() {
             app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
         }
 
-        if devcapture::hand_shot() {
+        if devcapture::settings_shot() {
+            app.add_systems(Update, devcapture::run_settings_shot);
+        } else if devcapture::hand_shot() {
             // Between the system that fills `Touch` in and the one that reads it, so the
             // faked pointer is what the hand actually sees.
             app.add_systems(

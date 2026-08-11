@@ -62,8 +62,15 @@ cargo test --release                                          # the sand model a
 cargo run --release -- --capture --out /tmp/shots              # colony: stock, dig, tap, shake
 cargo run --release -- --capture --sand-only --out /tmp/shots  # the M1 sand test, no colony
 cargo run --release -- --capture --title-shot --out /tmp/shots   # the title screen, both states, and the fade
-cargo run --release -- --capture --splash-shot --out /tmp/shots # three frames across the studio mark
+cargo run --release -- --capture --splash-shot --out /tmp/shots  # three frames across the studio mark
+cargo run --release -- --capture --wheel-shot --out /tmp/shots    # the radial menu, unlit and lit
+cargo run --release -- --capture --hand-shot --out /tmp/shots     # the hand's three poses
+cargo run --release -- --capture --settings-shot --out /tmp/shots # the settings window, tab by tab
 ```
+
+Anything that photographs UI has to keep the camera on the window *and* skip the offscreen
+target — see `ui_shot` in main.rs. The hand and settings runs also fake their input at the
+same seam a touchscreen would use, because an unattended run has no cursor at all.
 
 The output directory has to exist — the harness won't create it, and a missing one shows
 up only as `Cannot save screenshot` buried in the log while every number still prints
@@ -106,7 +113,15 @@ Things that cost real time and will look like new bugs if forgotten.
   Listen for the `Activate` event. A query for `Interaction` matches nothing while the
   button still lights up on hover, so it looks perfectly wired and does nothing.
 - **Duplicate components in one bundle is a hard panic.** `radial()` already carries
-  `Radial`; adding a second to seed state crashed on open.
+  `Radial`; adding a second to seed state crashed on open. The settings window then walked
+  into it three more times in one sitting — `backdrop()` brings its own `Layer`, and both
+  `button()` and `card()` bring their own `Node`. **Never add a `Node` beside an Ordo
+  bundle.** Size it in an `Added<..>` dressing pass, the way `dress_menu` and
+  `size_settings_ui` do.
+- **A hidden pane still holds its space.** `Visibility::Hidden` stops a thing being drawn and
+  leaves it in the layout, so a tabbed window reserved room for every pane at once and the
+  open one sat in a column of gaps. Ordo's tabs use `Display::None` now; remember it for
+  anything else that hides.
 - **Bevy only compiles in Vorbis by default.** `wav`, `mp3` and `flac` are opt-in features.
   A perfectly valid WAV panicked the audio system and left a window with nothing in it.
   Ship OGG.
