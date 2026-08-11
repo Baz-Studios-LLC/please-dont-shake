@@ -20,13 +20,11 @@
 
 use crate::grid::*;
 use crate::pheromones::*;
+use crate::radial::{PlacementQueue, Stock, StockItem};
 use crate::tank::TankRoot;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-
-/// Workers the farm starts with. A young colony, with room to grow.
-pub const STARTING_WORKERS: usize = 10;
 
 /// Cells per second. Our cells are ~1.2mm, so this is a shade under 2cm/s — about
 /// right for *Lasius*, and deliberately real-time even though biology is compressed.
@@ -320,13 +318,7 @@ pub fn setup_ant_assets(
 
 /// Seed the farm the way a real one starts: a founding queen sealed into a small
 /// chamber with a shaft to the surface. Everything past this the colony digs itself.
-pub fn found_colony(
-    mut commands: Commands,
-    mut grid: ResMut<SandGrid>,
-    assets: Res<AntAssets>,
-    tank: Single<Entity, With<TankRoot>>,
-) {
-    let tank = *tank;
+pub fn found_colony(mut grid: ResMut<SandGrid>) {
     let surface = INITIAL_SURFACE as isize;
     let entrance_x = GRID_W as isize / 2;
     let chamber_y = surface - 22;
@@ -351,11 +343,37 @@ pub fn found_colony(
         }
     }
 
-    let queen_pos = Vec2::new(entrance_x as f32, (chamber_y - 3) as f32);
-    commands.spawn((
+    // Deliberately no ants. The founding chamber is dug and empty, and the queen and her
+    // ten workers sit in your stock waiting to be placed — stocking the farm is the
+    // player's first act, not something that has already happened to them.
+}
+
+/// Ant bodies, shared by founding and by player placement.
+fn worker_bundle(assets: &AntAssets, pos: Vec2, age_days: f32, seed: u32) -> impl Bundle {
+    (
+        Ant {
+            pos,
+            heading: Vec2::from_angle(hash01(seed, 13, 0xC61) * std::f32::consts::TAU),
+            vel: Vec2::ZERO,
+            age_days,
+            carrying: None,
+            dig_cooldown: hash01(seed, 19, 0xE81) * DIG_INTERVAL,
+            haul_time: 0.0,
+            dislodged: 0.0,
+            // A little depth variation between individuals, purely for parallax.
+            z: SLAB_DEPTH * 0.5 - 0.012 - hash01(seed, 23, 0xF97) * 0.055,
+        },
+        Mesh3d(assets.worker_mesh.clone()),
+        MeshMaterial3d(assets.worker_mat.clone()),
+        Transform::default(),
+    )
+}
+
+fn queen_bundle(assets: &AntAssets, pos: Vec2) -> impl Bundle {
+    (
         Queen,
         Ant {
-            pos: queen_pos,
+            pos,
             heading: Vec2::X,
             vel: Vec2::ZERO,
             age_days: 400.0,
@@ -368,34 +386,72 @@ pub fn found_colony(
         Mesh3d(assets.worker_mesh.clone()),
         MeshMaterial3d(assets.queen_mat.clone()),
         Transform::default(),
-        ChildOf(tank),
-    ));
+    )
+}
 
-    for i in 0..STARTING_WORKERS {
-        let h = hash01(i as u32, 7, 0xA47);
-        let a = hash01(i as u32, 11, 0xB53);
-        let angle = hash01(i as u32, 13, 0xC61) * std::f32::consts::TAU;
+/// Turn queued placements into ants.
+///
+/// An ant can't be dropped inside packed sand, so a placement over solid ground searches
+/// outward for somewhere to stand. If there's genuinely nowhere close the stock is handed
+/// back rather than silently swallowed — holding over the middle of the sand shouldn't
+/// cost you one of ten workers.
+pub fn place_queued(
+    mut commands: Commands,
+    mut queue: ResMut<PlacementQueue>,
+    mut stock: ResMut<Stock>,
+    assets: Res<AntAssets>,
+    grid: Res<SandGrid>,
+    tank: Query<Entity, With<TankRoot>>,
+    mut placed: Local<u32>,
+) {
+    let Ok(tank) = tank.single() else {
+        return;
+    };
 
-        commands.spawn((
-            Ant {
-                pos: queen_pos + Vec2::new((h - 0.5) * 14.0, (a - 0.5) * 6.0),
-                heading: Vec2::from_angle(angle),
-                vel: Vec2::ZERO,
-                // Spread ages so every role exists from the start. Proper founding
-                // demography — one queen raising the first brood alone — is M3.
-                age_days: hash01(i as u32, 17, 0xD73) * 34.0,
-                carrying: None,
-                dig_cooldown: hash01(i as u32, 19, 0xE81) * DIG_INTERVAL,
-                haul_time: 0.0,
-                dislodged: 0.0,
-                z: SLAB_DEPTH * 0.5 - 0.012 - hash01(i as u32, 23, 0xF97) * 0.055,
-            },
-            Mesh3d(assets.worker_mesh.clone()),
-            MeshMaterial3d(assets.worker_mat.clone()),
-            Transform::default(),
-            ChildOf(tank),
-        ));
+    for (item, at) in queue.0.drain(..) {
+        let Some(pos) = nearest_free(&grid, at) else {
+            stock.give(item);
+            continue;
+        };
+
+        *placed += 1;
+        let seed = *placed;
+
+        match item {
+            StockItem::Queen => {
+                commands.spawn((queen_bundle(&assets, pos), ChildOf(tank)));
+            }
+            StockItem::Worker => {
+                // Spread ages so labour divides itself immediately: some nurses, some
+                // diggers, some at the surface. Real founding demography is M3.
+                let age = 2.0 + hash01(seed, 17, 0xD73) * 28.0;
+                commands.spawn((worker_bundle(&assets, pos, age, seed), ChildOf(tank)));
+            }
+            // Not simulated yet — the wedges are dimmed, so this shouldn't be reachable.
+            StockItem::Food | StockItem::Water => stock.give(item),
+        }
     }
+}
+
+/// Nearest cell an ant can actually stand in, spiralling out from the requested spot.
+fn nearest_free(grid: &SandGrid, at: Vec2) -> Option<Vec2> {
+    let (ax, ay) = (at.x.floor() as isize, at.y.floor() as isize);
+
+    for r in 0..12isize {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                // Only the ring at this radius; inner rings were covered already.
+                if r > 0 && dx.abs() != r && dy.abs() != r {
+                    continue;
+                }
+                let (x, y) = (ax + dx, ay + dy);
+                if SandGrid::in_bounds(x, y) && grid.is_air(x, y) {
+                    return Some(Vec2::new(x as f32 + 0.5, y as f32 + 0.5));
+                }
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

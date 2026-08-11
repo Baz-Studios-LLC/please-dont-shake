@@ -4,3 +4,6 @@
 screenshot-*.png
 
 .DS_Store
+
+# Throwaway synth experiments.
+scratch_*.py

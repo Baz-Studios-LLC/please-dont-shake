@@ -18,17 +18,21 @@
 //!   F12              screenshot
 
 mod ants;
+mod audio;
 mod devcapture;
 mod grains;
 mod grid;
 mod interact;
 mod meshing;
 mod pheromones;
+mod radial;
 mod sand;
 mod tank;
 mod title;
 
 use bevy::prelude::*;
+
+use audio::setup_music;
 
 use title::GameState;
 
@@ -107,9 +111,12 @@ fn main() {
         .init_resource::<ants::ColonyStats>()
         .insert_resource(Pheromones::new())
         .insert_resource(NavField::new())
+        .init_resource::<radial::RadialMenu>()
+        .init_resource::<radial::Stock>()
+        .init_resource::<radial::PlacementQueue>()
         .add_systems(
             Startup,
-            (setup_grain_assets, setup_ant_assets, setup_tank).chain(),
+            (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
         )
         // The colony only exists once you've pressed Begin — which is also what makes the
         // title screen an empty farm rather than a picture of one.
@@ -140,6 +147,8 @@ fn main() {
                 // don't exist until the colony does.
                 pointer_input.run_if(in_state(GameState::Playing)),
                 tank_spring,
+                ants::place_queued,
+                radial::sync_radial_ui,
                 sync_ant_transforms,
                 remesh_dirty_chunks,
             )

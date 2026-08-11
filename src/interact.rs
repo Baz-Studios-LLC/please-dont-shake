@@ -10,6 +10,7 @@
 
 use crate::grid::*;
 use crate::pheromones::{Ph, Pheromones};
+use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection, wedge_at};
 use crate::tank::{CAM_DIST, TankRoot, TankSpring};
 use bevy::prelude::*;
 
@@ -47,12 +48,19 @@ const TILT_FROM_DRAG: f32 = 2.2;
 
 const DIG_RADIUS_CELLS: f32 = 4.5;
 
+/// How long the button must be held still before the radial menu opens. Short enough not
+/// to feel like a wait, long enough that an ordinary tap never triggers it.
+const HOLD_TO_OPEN: f32 = 0.28;
+
 #[derive(Resource, Default)]
 pub struct PointerState {
     last_cursor: Option<Vec2>,
+    /// Where the press landed, in screen pixels — the radial menu's centre.
+    press_cursor: Vec2,
     /// Grid coordinates where the press landed, if it landed on the tank at all.
     press_cell: Option<Vec2>,
     drag_px: f32,
+    held: f32,
 }
 
 /// Vertical world units visible at the tank's depth, given Bevy's default 45° fov.
@@ -91,6 +99,9 @@ pub fn pointer_input(
     mut spring: ResMut<TankSpring>,
     mut grid: ResMut<SandGrid>,
     mut ph: ResMut<Pheromones>,
+    mut menu: ResMut<RadialMenu>,
+    mut stock: ResMut<Stock>,
+    mut placements: ResMut<PlacementQueue>,
 ) {
     let (camera, cam_tf) = *camera;
     let tank_tf = *tank;
@@ -111,15 +122,34 @@ pub fn pointer_input(
         brush(&mut grid, cell_of(local), adding);
     }
 
-    // ---- left button: tap and shake ----------------------------------------
+    // ---- left button: tap, shake, and the radial menu ----------------------
+    //
+    // All three share this button, split by what the hand does: release quickly and it's
+    // a tap, move and it's a shake, hold still and the menu opens. Once the menu is up the
+    // gesture is committed to it — dragging picks a wedge instead of shaking, so you can't
+    // accidentally wreck the farm while choosing what to put in it.
     if mouse.just_pressed(MouseButton::Left) {
         state.drag_px = 0.0;
+        state.held = 0.0;
+        state.press_cursor = cursor;
         state.press_cell = cursor_to_tank_local(camera, cam_tf, tank_tf, cursor).map(cell_of);
         state.last_cursor = Some(cursor);
     }
 
     if mouse.pressed(MouseButton::Left) {
-        if let Some(last) = state.last_cursor {
+        state.held += dt;
+
+        if menu.open {
+            menu.selected = wedge_at(cursor - menu.origin);
+        } else if state.drag_px < TAP_SLOP_PX
+            && state.held >= HOLD_TO_OPEN
+            && let Some(cell) = state.press_cell
+        {
+            menu.open = true;
+            menu.origin = state.press_cursor;
+            menu.cell = cell;
+            menu.selected = None;
+        } else if let Some(last) = state.last_cursor {
             let d_px = cursor - last;
             state.drag_px += d_px.length();
 
@@ -138,13 +168,18 @@ pub fn pointer_input(
     }
 
     if mouse.just_released(MouseButton::Left) {
-        if state.drag_px < TAP_SLOP_PX
-            && let Some(cell) = state.press_cell
-        {
-            tap(&mut grid, &mut ph, &mut spring, cell);
+        if menu.open {
+            commit_selection(&menu, &mut stock, &mut placements);
+            menu.open = false;
+            menu.selected = None;
+        } else if state.drag_px < TAP_SLOP_PX && state.held < HOLD_TO_OPEN {
+            if let Some(cell) = state.press_cell {
+                tap(&mut grid, &mut ph, &mut spring, cell);
+            }
         }
         state.last_cursor = None;
         state.press_cell = None;
+        state.held = 0.0;
     }
 }
 
