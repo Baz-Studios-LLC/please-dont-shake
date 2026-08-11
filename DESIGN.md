@@ -64,6 +64,28 @@ organs in their legs, and several species stridulate to alarm each other. You ar
 speaking to them in a channel they genuinely have. They respond, correctly, by treating
 you as a predator.
 
+### The hand
+
+There is no cursor. There is a hand, taken from Divus Factus — the studio already has one,
+and it is the right object for a game whose entire subject is what you do with yours.
+
+It carries the verbs on its face:
+
+| | |
+|---|---|
+| **A fingertip** | reaches out and presses, and the hand leans in after it. This is a tap. |
+| **A whole palm** | fingers splay, the hand flattens onto the glass and plants. This is the grab, and from here the tank goes wherever your arm does. |
+
+Which is a better sign than any label. The game asks you not to shake it, and the
+difference between one finger and a flat palm is legible *before* you have done either —
+so the moment your hand changes shape is the moment you know you've stopped being innocent.
+It changes at exactly the pixel the input path stops calling the gesture a tap; if those
+ever disagree the hand is lying.
+
+It is the cursor over the menus too, pressing buttons with the same finger. Nothing about
+it reads the mouse: it is told whether it is tapping or dragging, which is the same thing
+a finger on an iPad already knows.
+
 ### One farm, kept
 
 A farm is only ever destroyed by asking for a new one. Going back to the title screen

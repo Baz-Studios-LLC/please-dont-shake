@@ -10,11 +10,13 @@
 //! now only a debug tool: the ants dig for themselves.
 
 use crate::grid::*;
+use crate::hand::Touch;
 use crate::pheromones::{Ph, Pheromones};
 use crate::sand::{GrainSpawn, GrainSpawnQueue};
 use crate::radial::WEDGES;
 use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection};
-use crate::tank::{CAM_DIST, TankRoot, TankSpring};
+use crate::tank::{CAM_DIST, TankCamera, TankRoot, TankSpring};
+use crate::title::GameState;
 use bevy::prelude::*;
 use ordo::prelude::*;
 
@@ -97,12 +99,50 @@ fn cell_of(local: Vec3) -> Vec2 {
     Vec2::new(cx, cy)
 }
 
+/// Tell the hand what it's doing.
+///
+/// Runs in every state, unlike the verbs — the hand is the cursor on the title screen too,
+/// and it presses menu buttons with the same finger it taps glass with.
+///
+/// It measures the drag itself rather than reading [`PointerState`], which only turns over
+/// during play. The threshold is the *same* [`TAP_SLOP_PX`] the verbs use, and that is the
+/// point: the moment the hand flattens onto the glass is exactly the moment the input path
+/// stops calling the gesture a tap. If those two ever disagree the hand becomes a liar.
+pub fn track_touch(
+    mouse: Res<ButtonInput<MouseButton>>,
+    window: Single<&Window>,
+    state: Res<State<GameState>>,
+    menu: Res<RadialMenu>,
+    mut touch: ResMut<Touch>,
+    mut travel: Local<f32>,
+    mut last: Local<Option<Vec2>>,
+) {
+    let at = window.cursor_position();
+    let held = mouse.pressed(MouseButton::Left);
+
+    if mouse.just_pressed(MouseButton::Left) {
+        *travel = 0.0;
+    }
+    if held && let (Some(now), Some(before)) = (at, *last) {
+        *travel += now.distance(before);
+    }
+    *last = at;
+
+    // A palm plants on the glass only during play, and only once the gesture is genuinely a
+    // drag. Not while the wheel is open: that drag is aiming, not shaking.
+    touch.at = at;
+    touch.grabbing =
+        held && *travel > TAP_SLOP_PX && *state.get() == GameState::Playing && !menu.open;
+    // A fingertip and a whole palm are different gestures, so they don't overlap.
+    touch.pressing = held && !touch.grabbing;
+}
+
 pub fn pointer_input(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     window: Single<&Window>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform), With<TankCamera>>,
     tank: Single<&GlobalTransform, With<TankRoot>>,
     mut state: ResMut<PointerState>,
     mut spring: ResMut<TankSpring>,

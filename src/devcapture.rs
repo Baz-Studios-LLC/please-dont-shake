@@ -28,7 +28,7 @@ pub struct CaptureTarget(pub Handle<Image>);
 pub fn setup_offscreen_target(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    camera: Single<Entity, With<Camera3d>>,
+    camera: Single<Entity, With<crate::tank::TankCamera>>,
 ) {
     let mut image = Image::new_target_texture(
         CAPTURE_W,
@@ -86,6 +86,54 @@ pub fn splash_shot() -> bool {
 /// frames go to the offscreen texture, where no UI exists at all.
 pub fn wheel_shot() -> bool {
     std::env::args().any(|a| a == "--wheel-shot")
+}
+
+/// `--hand-shot` puts the hand on the glass and photographs each of its poses.
+///
+/// It has to fake the pointer. An unattended run has no cursor position at all — the window
+/// is never focused — so `Touch` is written straight here, downstream of the system that
+/// normally fills it in. Which is the same seam a touchscreen would use, so faking it is
+/// honest rather than a special case.
+pub fn hand_shot() -> bool {
+    std::env::args().any(|a| a == "--hand-shot")
+}
+
+/// Where the hand is put, in window pixels: over the sand, left of centre so the poses have
+/// room to be seen against a plain stretch of strata.
+const HAND_AT: Vec2 = Vec2::new(520.0, 470.0);
+/// Half a second between setting a pose and taking its picture, so the easing has landed.
+const HAND_SHOTS: [(f32, &str); 3] = [
+    (1.2, "hand-1-open"),
+    (2.2, "hand-2-pressing"),
+    (3.4, "hand-3-grabbing"),
+];
+
+pub fn run_hand_shot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut touch: ResMut<crate::hand::Touch>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+    let crossed = |at: f32| prev < at && cap.t >= at;
+
+    // Drifting, then a fingertip, then a whole palm — the hand's entire vocabulary.
+    touch.at = Some(HAND_AT);
+    touch.pressing = cap.t >= 1.7 && cap.t < 2.9;
+    touch.grabbing = cap.t >= 2.9;
+
+    for (at, name) in HAND_SHOTS {
+        if crossed(at) {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(format!("{}/{name}.png", cap.out_dir)));
+        }
+    }
+    if crossed(4.2) {
+        exit.write(AppExit::Success);
+    }
 }
 
 /// Where the wheel is opened, in window pixels, and which cell that stands for.

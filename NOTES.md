@@ -90,7 +90,18 @@ Things that cost real time and will look like new bugs if forgotten.
 
 - **`Single<T>` silently skips its system** when the query doesn't match exactly one
   entity. In an `OnEnter` system, which fires once, that means the thing never gets built
-  and nothing errors. This ate the whole title screen once.
+  and nothing errors. This ate the whole title screen once — and then, when the hand added a
+  *second* camera, every `Single<&Camera>` in the codebase stopped matching and the mouse
+  quietly went dead. Ask for `With<TankCamera>`; never for "the camera".
+- **A stacked overlay camera must not tonemap.** The hand draws on layer 1 through a second
+  camera with `order: 1` and no clear, over an image the tank camera has already run through
+  its tonemapping curve. Running the curve again turns the *whole window* black — and only
+  once the overlay has something to draw, so an empty layer looks fine and the bug appears
+  the moment the feature works. `Tonemapping::None` on the overlay. Divus Factus has the
+  same note about HDR having to match between stacked cameras; treat both as one rule.
+- **Two cameras make UI attachment ambiguous.** Say `IsDefaultUiCamera` on the tank camera,
+  or the menu may attach to the hand's overlay — which draws only layer 1, so the menu
+  simply isn't there.
 - **Ordo's buttons are `bevy_ui_widgets::Button`** and carry no `Interaction` component.
   Listen for the `Activate` event. A query for `Interaction` matches nothing while the
   button still lights up on hover, so it looks perfectly wired and does nothing.

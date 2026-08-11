@@ -24,6 +24,7 @@ mod devcapture;
 mod farm;
 mod grains;
 mod grid;
+mod hand;
 mod interact;
 mod meshing;
 mod pheromones;
@@ -125,9 +126,18 @@ fn main() {
         .init_resource::<pause::PauseMenu>()
         .init_resource::<ants::KitPour>()
         .init_resource::<farm::GameInProgress>()
+        .init_resource::<hand::Touch>()
         .add_systems(
             Startup,
-            (setup_grain_assets, setup_ant_assets, setup_tank, setup_music).chain(),
+            (
+                setup_grain_assets,
+                setup_ant_assets,
+                setup_tank,
+                // After the tank, whose camera the overlay hangs off.
+                hand::setup_hand,
+                setup_music,
+            )
+                .chain(),
         )
         .add_plugins(ordo::OrdoPlugin::with_theme("theme.ordo.toml"))
         // The studio's mark, over black, while the farm builds itself behind it.
@@ -173,7 +183,12 @@ fn main() {
             (
                 // No shaking the menu — the tank still settles behind it, but the verbs
                 // don't exist until the colony does.
+                // The hand is the cursor everywhere, so it's told what it's doing in every
+                // state; only the verbs are play-only.
+                interact::track_touch,
                 pointer_input.run_if(in_state(GameState::Playing)),
+                hand::move_hand,
+                hand::hide_the_pointer,
                 tank_spring,
                 ants::place_queued,
                 ants::pour_kit,
@@ -229,8 +244,10 @@ fn main() {
     // Two separate questions. Every run that photographs UI has to keep the camera on the
     // window (see the offscreen note below) — but only the two that photograph the shell
     // want to *start* there. The wheel is chrome over a live farm, so it opens in play.
-    let ui_shot =
-        devcapture::title_shot() || devcapture::splash_shot() || devcapture::wheel_shot();
+    let ui_shot = devcapture::title_shot()
+        || devcapture::splash_shot()
+        || devcapture::wheel_shot()
+        || devcapture::hand_shot();
     let shell_shot = devcapture::title_shot() || devcapture::splash_shot();
     if devcapture::capture_mode() && !shell_shot {
         app.insert_state(GameState::Playing);
@@ -251,7 +268,16 @@ fn main() {
             app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
         }
 
-        if devcapture::wheel_shot() {
+        if devcapture::hand_shot() {
+            // Between the system that fills `Touch` in and the one that reads it, so the
+            // faked pointer is what the hand actually sees.
+            app.add_systems(
+                Update,
+                devcapture::run_hand_shot
+                    .after(interact::track_touch)
+                    .before(hand::move_hand),
+            );
+        } else if devcapture::wheel_shot() {
             app.add_systems(Update, devcapture::run_wheel_shot);
         } else if devcapture::splash_shot() {
             app.add_systems(Update, devcapture::run_splash_shot);

@@ -13,6 +13,14 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct TankRoot;
 
+/// The camera that looks at the tank.
+///
+/// Named because the hand adds a second one, and `Single<&Camera>` silently *skips* its
+/// system when two match — which is not an error, just a game where nothing responds to the
+/// mouse any more. Anything wanting the view the player is looking through asks for this.
+#[derive(Component)]
+pub struct TankCamera;
+
 #[derive(Resource, Default)]
 pub struct TankSpring {
     pub offset: Vec3,
@@ -184,8 +192,16 @@ pub fn setup_tank(
     ));
 
     // Camera. Framed so the tank fills most of the view; it never moves again.
+    //
+    // `IsDefaultUiCamera` is load-bearing now that the hand adds a second camera: with two
+    // in the world, which one Bevy attaches the interface to stops being obvious, and the
+    // menu attaching to the hand's overlay would put it on a layer nothing else draws.
+    // Stating it costs nothing and this project has already lost the title screen twice to
+    // camera plumbing.
     commands.spawn((
+        TankCamera,
         Camera3d::default(),
+        bevy::ui::IsDefaultUiCamera,
         Transform::from_xyz(0.0, 0.0, CAM_DIST).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
