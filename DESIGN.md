@@ -38,9 +38,9 @@ That's the whole emotional mechanism. The player is a vandal, not a murderer.
 |---|---|
 | **Tone** | Cozy ambient sandbox. No fail state, no meters, no UI panels. |
 | **Reference** | *Mountain*. $0.99, impulse buy, lives in a window. |
-| **Time** | Real time over days. Colony clock ≈ **1 real hour : 1 colony day**. Sand and ant motion stay real-time; only biology compresses. |
+| **Time** | **Real time, throughout.** A colony day is a day. Nothing compresses — not the sand, not the ants, not the brood. Egg to worker takes about a week of wall-clock time. |
 | **Offline** | Paused when closed. You never return to a disaster you couldn't prevent. |
-| **Ending** | Natural lifespan. The queen's sperm reserve runs out, the colony winds down over ~40–60 hours. |
+| **Ending** | Natural lifespan. The queen's sperm reserve runs out and the colony winds down — on a real-time clock that is a matter of months, not an evening. |
 | **Text** | **None inside the tank, ever.** Behaviour is the only channel. |
 | **Grimness** | Full biological accuracy, presented plainly. No music sting, no camera push. It's just what happens. |
 | **Scale** | Hundreds of ants (200–500) at peak. Architected SoA so thousands is a config change. |
@@ -251,20 +251,19 @@ nest look inhabited rather than excavated.
 
 #### The timescale problem, and the decision
 
-Real *Lasius niger* takes something like seven or eight weeks from egg to worker. At the
-locked clock of **1 real hour : 1 colony day** that is fifty-odd hours — and the locked
-lifespan is 40–60 hours. A real colony lives through hundreds of brood cycles; ours would
-live through *one*, and the player would watch a single cohort arrive shortly before the
-queen's decline.
+Real *Lasius niger* takes something like seven or eight weeks from egg to worker. The cycle
+here is **six days**, which is the one place the simulation knowingly departs from the
+accuracy the rest of it holds to — and with the clock now running in real time, six days is
+six actual days.
 
-So the brood cycle compresses, and this is a deliberate departure from the accuracy the rest
-of the simulation holds to: **egg to worker in about six colony days**, so a farm left running
-overnight shows several cohorts and a population that visibly climbs and then falls. The
-alternative — keeping brood honest and stretching the lifespan to weeks of real time — is a
-different game, and not the one in the rest of this document.
+That was a choice made when the clock was an hour per day, where six colony days meant six
+hours. On a real-time clock it means a first cohort about a week in. The remaining
+compression is therefore the *shape* of the life stages rather than their pace, and if the
+farm should instead take a real two months to raise a worker, the three stage constants in
+`src/brood.rs` are where that lives.
 
-Recorded here rather than buried in a constant, because it is the one place the simulation
-knowingly lies, and anyone who finds the number later deserves to know it was a choice.
+Recorded rather than buried in a constant, because anyone who finds the number later deserves
+to know it was a choice.
 
 #### What it takes
 

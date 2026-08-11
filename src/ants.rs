@@ -1011,7 +1011,21 @@ pub struct ColonyClock {
 
 impl Default for ColonyClock {
     fn default() -> Self {
-        Self { days_per_second: 1.0 / 3600.0 }
+        // Real time. A colony day takes a day.
+        //
+        // This was an hour per day — biology compressed twenty-four times while the sand and
+        // the ants stayed real. Brett asked for the clock to run in real time, so it does:
+        // nothing in the farm now moves faster than it would in a tank on a shelf.
+        //
+        // What that costs, stated plainly because it changes the shape of the game. Egg to
+        // worker is six *days* rather than six hours, so a first cohort arrives about a week
+        // in and the queen's decline is a couple of months out. It is an ambient game you
+        // leave running, and now it is one on the scale of an actual ant farm — you will not
+        // see a life stage in a sitting, only that the pile is bigger than it was.
+        //
+        // The scripted runs override this; see `CAPTURE_DAYS_PER_SECOND`. It is the only way a
+        // two-minute test can say anything about a six-day life stage.
+        Self { days_per_second: 1.0 / 86_400.0 }
     }
 }
 

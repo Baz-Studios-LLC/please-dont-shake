@@ -190,6 +190,20 @@ git tag v0.1.1 && git push origin v0.1.1
 
 `v0.1.0` is out, with all three platform assets attached.
 
+## The clock is real time
+
+`ColonyClock::days_per_second` is `1/86400` — a colony day takes a day. It was an hour per
+day; Brett asked for real time and that is now the locked decision in DESIGN.md.
+
+Consequence, because it is easy to mistake for a bug: **you will not see a life stage in a
+sitting.** Egg to worker is six real days. A farm shows you that the pile is bigger than it
+was, not that anything hatched. Every scripted run overrides this — see
+`CAPTURE_DAYS_PER_SECOND` — and that override is the only reason a two-minute test can say
+anything at all about brood.
+
+If the farm ever feels dead rather than slow, the honest levers are the three stage constants
+in `src/brood.rs`, not the clock.
+
 ## Next: the queen goes missing at speed
 
 Brood works — see below — but the capture run at a colony day per second ends with the whole
