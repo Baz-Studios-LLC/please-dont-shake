@@ -246,31 +246,45 @@ under the old hour-per-day rate, because that increment was 24× larger and stay
 single-precision step. `a_worker_ages_a_day_in_a_day_at_any_age` in `src/ants.rs` guards it,
 and it starts the sum at thirty days rather than zero, which is the entire point of the test.
 
-## Next: the queen goes missing at speed
+## The two queens, and what it cost to find them
 
-Brood works — see below — but the capture run at a colony day per second ends with the whole
-colony gone and the brood counters *frozen* at the same numbers for the last three reports:
+Solved, and worth reading before trusting any old colony measurement. The capture run used to
+end with the colony gone and the brood counters frozen at identical numbers:
 
 ```
-04-nest-100s: jobs: 0 nurses, 0 diggers, 0 surface
-              brood 5 eggs, 8 larvae, 4 pupae | laid 73 | eclosed 73 | died 93
+04-nest-100s: 2 ants | jobs: 0 nurses, 0 diggers, 0 surface
+              brood 6 eggs, 7 larvae, 4 pupae | laid 73 | eclosed 73 | died 93
 ```
 
-Frozen counters are the signature of `tend_brood` returning early, and the only thing it
-returns early for is `queen.single()` failing. So **the queen is being lost** somewhere after
-about sixty seconds of accelerated time, and with her go the laying and the tending. Nothing
-in the code despawns her — `age_out` excludes `Queen` — so the likely candidates are: two
-queens existing at once (`single()` fails on more than one, and a second `AntKit` would do
-it), or the queen entity being despawned by something that doesn't know what it has.
+The diagnosis in these notes was **wrong** in an instructive way. It read "frozen counters mean
+`tend_brood` bailed on `queen.single()`, so the queen is being *lost*" — and then went looking
+for something that despawns her. Nothing does. The truth is the opposite: there were **two**
+queens. `single()` fails on two as surely as on none.
 
-Also suspect: `died 93` exceeds the 83 workers that ever existed (10 poured plus 73 eclosed).
-`FixedUpdate` can run several times per rendered frame and `Commands` are deferred, so the
-same ant is probably counted dead more than once before its despawn lands. Harmless to the
-sim, wrong in the report — fix the counter with a `Died` marker or by checking within the
-frame.
+The second one came from the harness. The colony run stocked the farm by pushing a placement
+into the queue at 0.2s, and then at 30s opened the radial menu and committed wedge zero to
+prove the menu still worked — and wedge zero is the **ant kit**. A second kit is a second
+queen. From 32s on, every colony run was measuring a farm that had silently stopped laying and
+stopped tending, which is why it looked like a collapse.
 
-Start here. It is a real bug in new code, and it was found by the harness rather than by eye,
-which is the system working.
+`died 93` was never wrong either: two kits is twenty poured workers plus seventy-three eclosed,
+and ninety-three of them died. The over-count theory about deferred `Commands` was chasing a
+number that added up all along.
+
+Three things came out of it, all of them keepers:
+
+- **The harness stocks the farm through the menu, once.** One kit, through the path a player
+  actually uses, at 0.1s. Better coverage than the two halves it replaced.
+- **`lay_eggs` and `tend_brood` take the *first* queen, not the only one.** Design says one
+  queen per farm, but code that detonates silently if it ever gets two is a trap, and this one
+  cost a full round of investigation. Nothing is logged when a system quietly returns early.
+- **The report counts the world, not the counters** — `live: N queens, M brood (K held)`. The
+  brood numbers in `BroodStats` are written by `tend_brood`, so when it bailed, the report
+  printed its last known values forever. A stale report is indistinguishable from a frozen
+  simulation, and that is what made this take so long.
+
+The lesson for next time: a frozen counter is evidence that a *system stopped running*, not
+evidence about *why*. Print the census before theorising.
 
 ## Brood, as built
 

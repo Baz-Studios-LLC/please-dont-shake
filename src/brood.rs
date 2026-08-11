@@ -188,7 +188,14 @@ pub fn lay_eggs(
     workers: Query<(), (With<Ant>, Without<Queen>)>,
     brood: Query<(), With<Brood>>,
 ) {
-    let (Some(assets), Ok(queen), Ok(tank)) = (assets, queen.single(), tank.single()) else {
+    // The *first* queen, not the only one. `queen.single()` here and in `tend_brood` was a
+    // silent catastrophe waiting: two queens in one tank made `single()` fail, so the colony
+    // stopped laying and stopped tending its brood, forever, with nothing logged and nothing
+    // to see except a farm that had quietly given up. A second ant kit is all it took, and the
+    // capture run was doing exactly that for weeks. Design says one queen per farm; the code
+    // should not detonate if it ever gets two.
+    let (Some(assets), Some(queen), Ok(tank)) = (assets, queen.iter().next(), tank.single())
+    else {
         return;
     };
 
@@ -278,7 +285,8 @@ pub fn tend_brood(
     nurses: Query<(Entity, &Ant), Without<Queen>>,
     mut brood: Query<(Entity, &mut Brood)>,
 ) {
-    let Ok(queen) = queen.single() else {
+    // The first queen. See `lay_eggs` for why this is not `single()`.
+    let Some(queen) = queen.iter().next() else {
         return;
     };
 

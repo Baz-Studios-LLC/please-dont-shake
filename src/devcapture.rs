@@ -548,13 +548,19 @@ const C_SHOTS: [(f32, &str); 4] = [
     (60.0, "03-digging-60s"),
     (100.0, "04-nest-100s"),
 ];
-/// Stock the farm before anything else — nothing is in the tank until it is placed.
-const C_STOCK: f32 = 0.2;
-
-/// Radial menu: open it, aim at a wedge, release. Guards against the spawn panic.
-const C_MENU_OPEN: f32 = 30.0;
-const C_MENU_PICK: f32 = 31.0;
-const C_MENU_CLOSE: f32 = 32.0;
+/// Radial menu: open it, aim at the ant kit, release. This is how the farm gets stocked —
+/// through the menu, the way a player does it, rather than by pushing a placement straight
+/// into the queue.
+///
+/// It used to be both: a direct push at 0.2s *and* a menu commit at 30s to prove the menu
+/// still worked. Wedge zero is the ant kit, so the second one tipped in a second colony —
+/// with a second queen. `lay_eggs` and `tend_brood` ask for `queen.single()`, which fails on
+/// two, so from 32s onward the run measured a colony that had silently stopped laying and
+/// stopped tending its brood. Every "the colony collapses" reading came from here. One kit,
+/// through the real path, once.
+const C_MENU_OPEN: f32 = 0.1;
+const C_MENU_PICK: f32 = 0.15;
+const C_MENU_CLOSE: f32 = 0.2;
 
 const C_TAP: f32 = 103.0;
 const C_SHOT_TAP: f32 = 107.0;
@@ -579,8 +585,7 @@ pub fn run_colony_capture(
     mut ph: ResMut<crate::pheromones::Pheromones>,
     mut spring: ResMut<TankSpring>,
     target: Res<CaptureTarget>,
-    grains: Query<(), With<crate::grains::Grain>>,
-    ants: Query<&crate::ants::Ant>,
+    live: Res<Census>,
     stats: Res<crate::ants::ColonyStats>,
     brood: Res<crate::brood::BroodStats>,
     mut clock: ResMut<crate::ants::ColonyClock>,
@@ -590,33 +595,20 @@ pub fn run_colony_capture(
     mut exit: MessageWriter<AppExit>,
 ) {
     let target = &target.0;
-    let in_flight = grains.iter().count();
-    let alive = ants.iter().count();
-    let carried = ants.iter().filter(|a| a.carrying.is_some()).count();
+    let (in_flight, alive, carried) = (live.in_flight, live.ants, live.carrying);
 
     let prev = cap.t;
     cap.t += time.delta_secs();
     let t = cap.t;
     let crossed = |mark: f32| prev < mark && t >= mark;
 
-    // Stock the farm, the way a player would.
-    //
-    // Nothing is in the tank until someone places it — so without this the whole colony
-    // run measured an empty box, and said so: "0 ants". One kit, dropped on the surface,
-    // exactly as the radial menu would place it.
     // Once, at the top, before anything is stocked.
     if prev == 0.0 {
         clock.days_per_second = CAPTURE_DAYS_PER_SECOND;
     }
 
-    if crossed(C_STOCK) {
-        let drop_at = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
-        placements.0.push((crate::radial::StockItem::AntKit, drop_at));
-        info!("tipped in the ant kit");
-    }
-
     // Baseline once the founding chamber exists but before the ants have done anything.
-    if crossed(0.3) {
+    if crossed(0.5) {
         cap.baseline_sand = grid.sand_count() + in_flight + carried;
         info!(
             "colony founded: {} ants, {} sand cells, {} cells pre-excavated",
@@ -629,21 +621,25 @@ pub fn run_colony_capture(
     for (mark, name) in C_SHOTS {
         if crossed(mark) {
             shoot_colony(
-                &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, &brood, target,
+                &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, &brood,
+                &live, target,
                 name,
             );
         }
     }
 
-    // Open the radial menu, point it at a wedge, and place something.
+    // Stock the farm the way a player does: open the radial menu, point it at the ant kit,
+    // release. Nothing is in the tank until someone places it — without this the whole run
+    // measured an empty box and said so ("0 ants").
     //
-    // The offscreen target can't show UI, so this proves nothing about how the menu
-    // *looks* — it exists because spawning it used to panic and nothing here would
-    // have caught that. Two of the three bugs found in this UI were found by hand.
+    // Going through the menu rather than pushing into the placement queue means the run also
+    // covers the path the player uses, including `commit_selection` spending the stock. The
+    // offscreen target can't show UI, so this still proves nothing about how the menu *looks*
+    // — but spawning it used to panic, and nothing else here would catch that.
     if crossed(C_MENU_OPEN) {
         menu.open = true;
         menu.origin = Vec2::new(640.0, 400.0);
-        menu.cell = Vec2::new(GRID_W as f32 * 0.5, INITIAL_SURFACE as f32 - 10.0);
+        menu.cell = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
         info!("opened the radial menu");
     }
     if crossed(C_MENU_PICK) {
@@ -671,6 +667,7 @@ pub fn run_colony_capture(
             carried,
             &stats,
             &brood,
+            &live,
             target,
             "05-after-tap",
         );
@@ -703,6 +700,7 @@ pub fn run_colony_capture(
             carried,
             &stats,
             &brood,
+            &live,
             target,
             "06-mid-shake",
         );
@@ -717,6 +715,7 @@ pub fn run_colony_capture(
             carried,
             &stats,
             &brood,
+            &live,
             target,
             "07-settled",
         );
@@ -725,6 +724,41 @@ pub fn run_colony_capture(
     if crossed(C_QUIT) {
         exit.write(AppExit::Success);
     }
+}
+
+/// What is actually in the tank right now, as opposed to what the counters last recorded.
+///
+/// A resource with its own pass rather than more queries on the report, for two reasons. The
+/// colony capture was already at Bevy's sixteen-parameter ceiling — a seventeenth stops being a
+/// system, and the error for that is `no method named 'before'` on the system itself, which
+/// points nowhere near the cause. And a census is a thing the harness should be able to take
+/// from anywhere.
+#[derive(Resource, Default)]
+pub struct Census {
+    ants: usize,
+    carrying: usize,
+    in_flight: usize,
+    queens: usize,
+    brood: usize,
+    held: usize,
+}
+
+/// Count what is in the tank. Before the report, every frame of a capture run.
+pub fn take_census(
+    mut census: ResMut<Census>,
+    ants: Query<&crate::ants::Ant>,
+    queens: Query<(), With<crate::ants::Queen>>,
+    pile: Query<&crate::brood::Brood>,
+    grains: Query<(), With<crate::grains::Grain>>,
+) {
+    *census = Census {
+        ants: ants.iter().count(),
+        carrying: ants.iter().filter(|ant| ant.carrying.is_some()).count(),
+        in_flight: grains.iter().count(),
+        queens: queens.iter().count(),
+        brood: pile.iter().count(),
+        held: pile.iter().filter(|item| item.held_by.is_some()).count(),
+    };
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -737,6 +771,7 @@ fn shoot_colony(
     carried: usize,
     stats: &crate::ants::ColonyStats,
     brood: &crate::brood::BroodStats,
+    live: &Census,
     target: &Handle<Image>,
     name: &str,
 ) {
@@ -769,6 +804,12 @@ fn shoot_colony(
         "    brood {} eggs, {} larvae, {} pupae ({} carried) | laid {} | eclosed {} | died {}",
         brood.eggs, brood.larvae, brood.pupae, brood.carried, brood.laid, brood.eclosed,
         brood.died
+    );
+    // From the world rather than from the counters above. A colony with no queen is the end of
+    // the farm and has to be legible as that, not as a report that stopped changing.
+    info!(
+        "    live: {} queens, {} brood ({} held)",
+        live.queens, live.brood, live.held,
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",

@@ -342,7 +342,12 @@ fn main() {
             // The original M1 cohesion test, with no colony to disturb the numbers.
             app.add_systems(Update, devcapture::run_capture.before(tank_spring));
         } else {
-            app.add_systems(Update, devcapture::run_colony_capture.before(tank_spring));
+            app.init_resource::<devcapture::Census>().add_systems(
+                Update,
+                (devcapture::take_census, devcapture::run_colony_capture)
+                    .chain()
+                    .before(tank_spring),
+            );
         }
     }
 
