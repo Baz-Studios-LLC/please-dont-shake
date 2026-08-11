@@ -1,0 +1,21 @@
+[package]
+name = "please_dont_shake"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.19"
+
+# Bevy's recommended dev profile: our own code builds fast, dependencies build fast-running.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Thin LTO gets nearly all of the cross-crate inlining that matters with Bevy.
+# `codegen-units = 1` on top of it buys a couple of percent at runtime and costs a
+# serialised relink of the whole binary on every code change, which isn't a trade worth
+# making while the game is still being written. Revisit when we actually ship.
+[profile.release]
+lto = "thin"

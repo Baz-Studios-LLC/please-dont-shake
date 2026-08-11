@@ -1,0 +1,6 @@
+/target
+
+# F12 screenshots land next to the executable.
+screenshot-*.png
+
+.DS_Store
