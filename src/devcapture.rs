@@ -617,19 +617,37 @@ pub fn screenshot_hotkey(
 /// be left switched on would eventually be left switched on, and the difference between this
 /// game and a game is that its clock is honest.
 ///
-/// Only *biology* moves: brood, ageing, laying. It cannot be otherwise, and this is worth
-/// understanding before wishing for a single knob that speeds everything up. Watching a brood
-/// cycle in a minute needs 8,640× real time, and the sand is a cellular automaton over a
-/// quarter of a million cells at 60 Hz — 8,640× would be half a million sweeps a second. The
-/// sand and the ants stay real; what gets compressed is the calendar.
+/// **Two entries, and it used to be four.** Brett: "our dev speedup should never break the
+/// simulation, so we can remove any speed that does." The two that were removed did.
 ///
-/// The top of the table is what every scripted run has always used: a colony day a second, or
-/// a hundred and twenty-five days in a two-minute capture.
-pub const SPEEDS: [(f64, &str); 4] = [
+/// Biology *and* labour are both scaled now — see [`crate::ants::ColonyClock::labour_scale`] — so
+/// a fast-forward compresses the whole colony rather than only its calendar. What cannot be scaled
+/// is walking: an ant at 86,400× would cross the tank inside a tick, on sand that steps at 60 Hz.
+///
+/// That sets a hard ceiling, and it is measurable rather than a matter of taste. The test is how
+/// far an ant walks between bites, because that is what spreads its digging into galleries instead
+/// of hollowing out wherever it happens to stand. A real *Lasius* digger walks on the order of
+/// 28,000 cells per cell it excavates (100m a day at 1.2mm a cell, against three cells a day). At
+/// real time this model gives 420,000 — sparse, erring the safe way. Scaled:
+///
+/// | speed | cells walked per cell dug | verdict |
+/// |---|---|---|
+/// | real time | 420,000 | faithful |
+/// | a colony day an hour, 24× | 17,500 | faithful |
+/// | a colony day a minute, 1,440× | 292 | 1/96 of real — blobs, not galleries |
+/// | a colony day a second, 86,400× | 4.9 | 1/5,700 of real — hollows out where it stands |
+///
+/// So 24× is the ceiling, which is *exactly* the rate this game shipped at before the clock went
+/// real. That rate was never arbitrary; it was the balance point, and two independent derivations
+/// land on it — this one, and the fact that a bite cannot happen more than once per 60 Hz tick.
+///
+/// The cost is real and worth stating: a two-minute capture at 24× covers three hundredths of a
+/// colony day, so the harness can no longer say anything about brood or founding. Those need long
+/// runs at an honest speed. A fast number from a broken speed was worse than no number — three of
+/// them sent me chasing a crowding brake that was working.
+pub const SPEEDS: [(f64, &str); 2] = [
     (1.0 / 86_400.0, "real time — a colony day takes a day"),
     (1.0 / 3_600.0, "a colony day an hour"),
-    (1.0 / 60.0, "a colony day a minute"),
-    (1.0, "a colony day a second"),
 ];
 
 /// Where in [`SPEEDS`] the game is running. Deliberately not saved: see the table.
@@ -710,6 +728,13 @@ mod speed_tests {
     /// and twenty-five days of evidence behind it.
     #[test]
     fn the_table_starts_at_real_time_and_only_climbs() {
+        // The ceiling is 24×, derived in the doc comment on `SPEEDS` from how far an ant walks
+        // between bites. A faster entry is not a tuning choice; it is a broken instrument, and
+        // three measurements were lost to one. Anything added here has to pass that arithmetic.
+        assert!(
+            SPEEDS[SPEEDS.len() - 1].0 <= 1.0 / 3_600.0,
+            "a speed faster than a colony day an hour hollows the nest out instead of tunnelling it",
+        );
         assert_eq!(ColonySpeed::default().0, 0, "a run must start at real time");
         assert_eq!(SPEEDS[0].0, 1.0 / 86_400.0, "index zero is not real time");
         assert_eq!(CAPTURE_DAYS_PER_SECOND, SPEEDS[SPEEDS.len() - 1].0);
@@ -762,8 +787,6 @@ mod speed_tests {
         let days_in = |rate: f64, seconds: f64| rate * seconds;
         assert!((days_in(SPEEDS[0].0, 86_400.0) - 1.0).abs() < 1e-12, "a day a day");
         assert!((days_in(SPEEDS[1].0, 3_600.0) - 1.0).abs() < 1e-12, "a day an hour");
-        assert!((days_in(SPEEDS[2].0, 60.0) - 1.0).abs() < 1e-12, "a day a minute");
-        assert!((days_in(SPEEDS[3].0, 1.0) - 1.0).abs() < 1e-12, "a day a second");
     }
 }
 
@@ -900,13 +923,16 @@ const C_QUIT: f32 = 125.0;
 
 /// Colony-days per real second for the scripted runs.
 ///
-/// The game runs in real time — a colony day per day — so a two-minute capture covers a
-/// thousandth of a day and nothing about the brood is observable at all. At one day a second
-/// the same run covers a hundred and twenty-five days — twenty brood cycles — which is the
-/// only way a two-minute test can say anything about a six-day life stage.
+/// The fastest honest speed — see [`SPEEDS`] for why there is no faster one to reach for.
 ///
-/// The top of [`SPEEDS`], so the fastest thing the speed keys can do is the thing every capture
-/// run has always done. One rate, exercised end to end on every run.
+/// This used to be a colony day a *second*, and every colony number this project has published
+/// came off runs at that rate. They measured a farm whose biology ran 86,400× while its ants dug
+/// at walking pace: brood counts and populations from those runs are fiction, and the shapes are
+/// worse than fiction because they were hollowed out rather than tunnelled.
+///
+/// At 24× a two-minute capture is three hundredths of a colony day. This run is therefore a sand
+/// and locomotion test — mass conservation, stalling, spoil hauling, the collapse and the rebuild
+/// — and it no longer pretends to be a demography test. Brood and founding need a long run.
 const CAPTURE_DAYS_PER_SECOND: f64 = SPEEDS[SPEEDS.len() - 1].0;
 
 pub fn run_colony_capture(

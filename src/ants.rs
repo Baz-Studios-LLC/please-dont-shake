@@ -38,8 +38,37 @@ const GRAVITY: f32 = 26.0;
 const NURSE_UNTIL: f64 = 10.0;
 const DIGGER_UNTIL: f64 = 26.0;
 
-/// Seconds between excavation attempts — an ant gnaws, it doesn't vaporise sand.
-const DIG_INTERVAL: f32 = 0.45;
+/// Seconds a digger waits between bites, **at real time**.
+///
+/// Eight and a third hours, which looks absurd and is the number the clock demands. The arithmetic,
+/// because a constant this strange has to show its working: our cells are 1.2mm, so 1.44mm² each,
+/// and a mature *Lasius* nest in a formicarium is galleries on the order of 100cm² seen side-on —
+/// about 7,000 cells, excavated over a couple of months. That is 115 cells a day for the whole
+/// colony. Split across the ~40 diggers in a colony of a hundred, one digger accounts for under
+/// three cells a day, and one bite every 30,000 seconds is what that means.
+///
+/// It replaces 0.45 seconds, which was set when a colony day took an hour and was 1,300× too fast
+/// for a day that takes a day. That mismatch was not a detail: it meant the colony would relocate
+/// the entire tank in an afternoon, and it is what made every measurement of the crowding brake a
+/// lie — biology ran 86,400× while labour ran once, so the founding workers died of old age inside
+/// thirty-five seconds while a bite still took half of one.
+///
+/// **The fast-forward scales this**, by exactly the factor it scales biology by — see
+/// [`ColonyClock::labour_scale`]. At a colony day a second the effective interval is a third of a
+/// second, which is roughly what the game did before; at real time a colony excavates about five
+/// cells an hour, and the farm is a thing you notice over weeks. That is the trade Brett chose,
+/// and the reason it is the right one is the shake: a rebuild measured in days is a cost you watch
+/// being paid, which is what gives "please don't shake" its teeth.
+const DIG_INTERVAL: f32 = 30_000.0;
+
+/// Seconds between the bites of an ant clawing out of a collapse, and *not* scaled by labour.
+///
+/// Construction is colony business on a colony's timescale; getting out from under a cave-in is an
+/// animal in trouble, and it happens at the speed an ant actually moves. Sharing one constant
+/// would mean a shaken colony took eight hours a cell to dig itself free — every ant buried by a
+/// shake would simply be dead, and the farm would never recover from the one verb the game is
+/// about.
+const ESCAPE_INTERVAL: f32 = 0.45;
 const DIG_DEPOSIT: f32 = 1.0;
 /// How far ahead an ant looks for a face to bite, in cells. Must be at least one cell:
 /// a tick's walk is a fraction of a cell, so probing the step target would mostly
@@ -137,7 +166,7 @@ const QUEEN_SPOIL_OFFSET: isize = 4;
 
 /// Seconds between the founding queen's own bites. She is slow, and she only digs at all until
 /// she is in — see `settle_the_queen`.
-const QUEEN_DIG_INTERVAL: f32 = 1.1;
+const QUEEN_DIG_INTERVAL: f32 = 28_800.0;
 
 /// The queen's pace, walking in and then pottering about once she is in. She is the largest
 /// thing in the tank and she is not going anywhere in a hurry.
@@ -616,6 +645,7 @@ fn can_stand(grid: &SandGrid, nav: &NavField, pos: Vec2, from_y: f32) -> bool {
 
 pub fn update_ants(
     time: Res<Time>,
+    clock: Res<ColonyClock>,
     mut grid: ResMut<SandGrid>,
     mut ph: ResMut<Pheromones>,
     nav: Res<NavField>,
@@ -623,6 +653,7 @@ pub fn update_ants(
     mut ants: Query<(&mut Ant, Has<Queen>)>,
 ) {
     let dt = time.delta_secs();
+    let labour = clock.labour_scale();
     // Read once, before the grid is borrowed mutably for digging.
     let tick = grid.tick;
     stats.buried = 0;
@@ -688,7 +719,7 @@ pub fn update_ants(
         // The queen walks in, then stays in. She is also the only ant that never digs.
         if is_queen {
             ph.deposit(Ph::Queen, ux, uy, 2.0 * dt);
-            settle_the_queen(&mut ant, &mut grid, &nav, tick, dt);
+            settle_the_queen(&mut ant, &mut grid, &nav, tick, dt, labour);
             continue;
         }
 
@@ -758,7 +789,8 @@ pub fn update_ants(
             digs_downward,
         );
         if ready_to_dig {
-            ant.dig_cooldown -= dt;
+            // Labour runs on the colony's clock, not the wall's. See `DIG_INTERVAL`.
+            ant.dig_cooldown -= dt * labour;
         }
 
         ant.heading =
@@ -810,7 +842,14 @@ fn wants_to_dig(
 /// occupy what the workers have already opened — which means the queen going deep is a thing
 /// the colony achieves for her rather than a scripted move, and on a farm nobody has dug yet
 /// she simply waits on the surface, correctly.
-fn settle_the_queen(ant: &mut Ant, grid: &mut SandGrid, nav: &NavField, tick: u32, dt: f32) {
+fn settle_the_queen(
+    ant: &mut Ant,
+    grid: &mut SandGrid,
+    nav: &NavField,
+    tick: u32,
+    dt: f32,
+    labour: f32,
+) {
     let (cx, cy) = cell_of(ant.pos);
     let (ux, uy) = (
         cx.clamp(0, GRID_W as isize - 1) as usize,
@@ -844,7 +883,7 @@ fn settle_the_queen(ant: &mut Ant, grid: &mut SandGrid, nav: &NavField, tick: u3
     // digging a shaft is *the shaft*: every grain fell straight back down the hole, refilled it
     // behind her, and left the workers re-digging the same cells forever — `dug 1284 -> excavated
     // 53`. Alternating sides is what makes it a ring rather than a bank on one flank.
-    ant.dig_cooldown -= dt;
+    ant.dig_cooldown -= dt * labour;
     let ground = nav.surface_at(ux) as f32;
     let founding = ant.pos.y + crate::brood::FOUNDING_DEPTH > ground;
     if founding && ant.dig_cooldown <= 0.0 {
@@ -1172,8 +1211,9 @@ fn escape_burial(
     // Struggling counts as a disturbance, which is how a burial recruits help.
     ph.deposit(Ph::Alarm, ux, uy, BURIAL_ALARM_RATE * dt);
 
-    // Claw upward — the shortest way to air. Rate-limited like any other digging, or a
-    // buried ant would bore out sixty cells a second.
+    // Claw upward — the shortest way to air. Rate-limited, or a buried ant would bore out sixty
+    // cells a second — but at `ESCAPE_INTERVAL` and *unscaled*, because this is survival rather
+    // than construction.
     ant.dig_cooldown -= dt;
     if ant.dig_cooldown > 0.0 {
         return;
@@ -1183,7 +1223,7 @@ fn escape_burial(
     if grid.get(ux, above).mat == Substance::Sand {
         let cell = grid.take(ux, above);
         ant.carrying = Some(cell.shade);
-        ant.dig_cooldown = DIG_INTERVAL;
+        ant.dig_cooldown = ESCAPE_INTERVAL;
         stats.dug += 1;
     }
     if grid.is_air(ux as isize, above as isize) {
@@ -1261,6 +1301,22 @@ pub struct ColonyClock {
 /// twice — once for playing and once for having been away. They would then drift.
 #[derive(Resource, Default)]
 pub struct ColonyStep(pub f64);
+
+impl ColonyClock {
+    /// How many times faster than real time the colony is running.
+    ///
+    /// One at real time, 86,400 at a colony day a second. Everything the colony *does* is
+    /// multiplied by this, so a fast-forward compresses work and biology by the same factor
+    /// instead of only biology — which is what made the harness a liar.
+    ///
+    /// Locomotion is the exception, and it cannot be otherwise: an ant walking 86,400× would cross
+    /// the tank in a tick, and the sand automaton it walks on runs at 60 Hz. So a fast-forward is
+    /// faithful about *how much* a colony digs and never about *where* — quantities can be trusted
+    /// at any speed, nest shape only at low multipliers over long runs.
+    pub fn labour_scale(&self) -> f32 {
+        (self.days_per_second * 86_400.0) as f32
+    }
+}
 
 /// One tick of colony time. First in the fixed schedule, so everything after it agrees.
 pub fn advance_colony_clock(

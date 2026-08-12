@@ -253,6 +253,35 @@ was, not that anything hatched. Every scripted run overrides this — see
 `CAPTURE_DAYS_PER_SECOND` — and that override is the only reason a two-minute test can say
 anything at all about brood.
 
+### Labour runs on the colony's clock, and the fast-forward scales both
+
+The clock decision was only half done for a long time: biology ran at a day a day while an ant
+still bit sand every 0.45 seconds. That is 1,300× too fast — 1.2mm cells, a real *Lasius*
+formicarium nest of ~7,000 cells over two months, so 115 cells a day for the colony and under three
+a day for one digger. `DIG_INTERVAL` is 30,000 seconds now, and `ColonyClock::labour_scale` multiplies
+it by however many times faster than real time the clock is set to.
+
+**It also means every colony number published before 2026-08-12 is fiction.** They came off runs at
+a colony day a *second*, where biology ran 86,400× and ants dug at walking pace, so the founding
+workers died of old age in thirty-five seconds and any rule needing work-before-biology failed by
+construction. Three measurements of the crowding brake were lost to it before Brett asked the
+question that explained it: "shouldn't the digging speed up too?"
+
+**The speed table has two entries and the ceiling is 24×, derived not chosen.** The test is how far
+an ant walks between bites, since that is what spreads digging into galleries instead of hollowing
+out where it stands: real diggers manage ~28,000 cells walked per cell dug, real time here gives
+420,000, a day an hour gives 17,500, a day a minute gives 292 and a day a second gives 4.9. The last
+two are blob-makers and are gone. A test in `devcapture` pins the ceiling so nothing creeps back.
+
+Two things stay off the labour clock, deliberately: escaping a burial (`ESCAPE_INTERVAL`, an animal
+in trouble, not construction) and everything the player does.
+
+**The 125-second capture can no longer see the colony** — three hundredths of a colony day, one
+cell dug. It is a sand and locomotion instrument now: mass conservation, stalling, hauling,
+collapse and rebuild. Brood, founding and nest shape need long runs at 24× — six real hours for one
+brood cycle. Nobody has run one yet, and until somebody does, no claim about nest shape in this
+repo is evidence.
+
 ### Testing it: `[` and `]`
 
 Six real days a brood cycle is untestable by eye, so the colony's calendar has a speed control —

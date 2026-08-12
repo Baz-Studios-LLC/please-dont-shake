@@ -53,6 +53,7 @@ That's the whole emotional mechanism. The player is a vandal, not a murderer.
 | **Reference** | *Mountain*. $0.99, impulse buy, lives in a window. |
 | **Time** | **Real time, throughout.** A colony day is a day. Nothing compresses — not the sand, not the ants, not the brood. Egg to worker takes about a week of wall-clock time. |
 | **Offline** | **Paused when closed, by default** — because the game is meant to be *left running*, so it has the days it needs and everything you come back to actually happened. A setting turns catch-up on for people who close the app; it settles biology only, never the sand. |
+| **Labour** | **On the colony's clock, not the wall's.** A digger bites once every 30,000 real seconds, so the colony excavates about 115 cells a day and a mature nest of ~7,000 takes a couple of months — matched to a real formicarium at 1.2mm a cell. Shake it and the repair is measured in days, which is the point: a cost you watch being paid is heavier than one that resolves before you have finished feeling guilty. Escaping a collapse is *not* on this clock; that is an animal in trouble, at animal speed. |
 | **Ending** | Natural lifespan. The queen's sperm reserve runs out and the colony winds down — on a real-time clock that is a matter of months, not an evening. |
 | **Text** | **None inside the tank, ever.** Behaviour is the only channel. |
 | **Grimness** | Full biological accuracy, presented plainly. No music sting, no camera push. It's just what happens. |
