@@ -26,7 +26,7 @@ use bevy::prelude::*;
 
 use crate::ants::{Ant, AntAssets, ColonyStep, Job, Queen, body_bundle};
 use crate::grid::*;
-use crate::pheromones::NavField;
+use crate::pheromones::{NavField, Ph, Pheromones};
 use crate::tank::TankRoot;
 
 /// Colony-days in each stage. Six days from laying to a walking worker.
@@ -418,6 +418,23 @@ pub fn age_out(
             commands.entity(entity).despawn();
             stats.died += 1;
         }
+    }
+}
+
+/// The pile asks for room.
+///
+/// Its own system because brood has no other reason to touch the fields, and because this is the
+/// half of crowding that does not walk away: eggs sit where the nurses put them, so the demand
+/// stays in one place long enough for the colony to answer it by digging. A chamber is what that
+/// answer looks like.
+pub fn brood_crowds(time: Res<Time>, mut ph: ResMut<Pheromones>, brood: Query<&Brood>) {
+    let dt = time.delta_secs();
+    for item in &brood {
+        let (x, y) = (
+            (item.pos.x.max(0.0) as usize).min(GRID_W - 1),
+            (item.pos.y.max(0.0) as usize).min(GRID_H - 1),
+        );
+        ph.deposit(Ph::Crowd, x, y, crate::ants::CROWD_PER_BROOD * dt);
     }
 }
 

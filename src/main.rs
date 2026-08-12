@@ -196,6 +196,7 @@ fn main() {
                 brood::lay_eggs,
                 brood::tend_brood,
                 brood::age_brood,
+                brood::brood_crowds,
                 brood::unbury_brood,
                 brood::age_out,
                 step_sand,

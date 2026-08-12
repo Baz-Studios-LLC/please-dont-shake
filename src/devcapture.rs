@@ -13,6 +13,7 @@ use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::grid::*;
+use crate::pheromones::{Ph, Pheromones};
 use crate::tank::TankSpring;
 use crate::title::GameState;
 
@@ -450,6 +451,86 @@ pub fn excavated_volume(grid: &SandGrid) -> usize {
 /// colony digs out is either still in the mound, back in the hole, or in a mandible, and
 /// only the first is progress. Mound plus excavated should track the dig count; when it
 /// doesn't, spoil is coming back in and the difference is how much.
+/// Open space, and how much of it is *room* rather than corridor.
+///
+/// A cell counts as room when it and its four neighbours are all air — the interior of something
+/// at least three cells across. A one-cell tunnel scores zero however long it is, so "did the
+/// colony build a chamber" becomes a number instead of my opinion of a screenshot. Which it has
+/// been until now: every claim about nest shape in this project has been read off a picture.
+pub fn open_and_room(grid: &SandGrid) -> (usize, usize) {
+    let mut open = 0;
+    let mut room = 0;
+    // Below the original fill line only. Measured over the whole tank it reported `room 14986`
+    // on a farm with no chambers in it whatsoever — the empty air above the sand is the roomiest
+    // place in the box, and counting it drowns the nest by three orders of magnitude.
+    for y in 1..INITIAL_SURFACE {
+        for x in 1..GRID_W - 1 {
+            if !grid.is_air(x as isize, y as isize) {
+                continue;
+            }
+            open += 1;
+            let walled = [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|(dx, dy)| !grid.is_air(x as isize + dx, y as isize + dy));
+            if !walled {
+                room += 1;
+            }
+        }
+    }
+    (open, room)
+}
+
+/// The crowding field, as the ants see it: the busiest cell, and what it reads where the queen is.
+///
+/// Printed so the threshold that gates digging can be chosen from measured numbers. Setting it by
+/// eye would be picking the most load-bearing constant in the colony out of the air.
+pub fn crowd_readings(ph: &Pheromones, queen: Option<Vec2>, ants: &[Vec2]) -> (f32, f32, f32) {
+    let mut peak = 0.0f32;
+    let mut total = 0.0f32;
+    let mut cells = 0.0f32;
+    for y in 0..GRID_H {
+        for x in 0..GRID_W {
+            let v = ph.get(Ph::Crowd, x, y);
+            if v > 0.0 {
+                peak = peak.max(v);
+                total += v;
+                cells += 1.0;
+            }
+        }
+    }
+    let read_at = |p: Vec2| {
+        ph.get(
+            Ph::Crowd,
+            (p.x.max(0.0) as usize).min(GRID_W - 1),
+            (p.y.max(0.0) as usize).min(GRID_H - 1),
+        )
+    };
+    let at_queen = queen.map(read_at).unwrap_or(0.0);
+
+    // What an ant actually feels, and how many would be let through by each candidate threshold.
+    // The gate on digging is the most load-bearing constant in the colony; picking it by eye
+    // would be picking it out of the air.
+    let mut felt: Vec<f32> = ants.iter().map(|p| read_at(*p)).collect();
+    felt.sort_by(f32::total_cmp);
+    if !felt.is_empty() {
+        let pick = |q: f32| felt[((felt.len() - 1) as f32 * q) as usize];
+        let over = |t: f32| felt.iter().filter(|v| **v >= t).count() * 100 / felt.len();
+        info!(
+            "    felt by ants: median {:.2} | 75th {:.2} | 90th {:.2} | max {:.2} | share over 1/2/5/10: {}/{}/{}/{}%",
+            pick(0.5),
+            pick(0.75),
+            pick(0.90),
+            felt[felt.len() - 1],
+            over(1.0),
+            over(2.0),
+            over(5.0),
+            over(10.0),
+        );
+    }
+
+    (peak, if cells > 0.0 { total / cells } else { 0.0 }, at_queen)
+}
+
 /// The spoil heap's shape: how tall the tallest column stands above the original fill line, and
 /// how many columns carry any spoil at all.
 ///
@@ -843,6 +924,7 @@ pub fn run_colony_capture(
     mut menu: ResMut<crate::radial::RadialMenu>,
     mut stock: ResMut<crate::radial::Stock>,
     mut placements: ResMut<crate::radial::PlacementQueue>,
+    everyone: Query<(&crate::ants::Ant, Has<crate::ants::Queen>)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let target = &target.0;
@@ -850,6 +932,10 @@ pub fn run_colony_capture(
 
     let prev = cap.t;
     cap.t += time.delta_secs();
+    let ant_at: Vec<Vec2> = everyone.iter().map(|(ant, _)| ant.pos).collect();
+    let queen_at = everyone
+        .iter()
+        .find_map(|(ant, is_queen)| is_queen.then_some(ant.pos));
     let t = cap.t;
     let crossed = |mark: f32| prev < mark && t >= mark;
 
@@ -873,7 +959,7 @@ pub fn run_colony_capture(
         if crossed(mark) {
             shoot_colony(
                 &mut commands, &cap, &grid, in_flight + carried, alive, carried, &stats, &brood,
-                &live, target,
+                &live, &ph, queen_at, &ant_at, target,
                 name,
             );
         }
@@ -919,6 +1005,9 @@ pub fn run_colony_capture(
             &stats,
             &brood,
             &live,
+            &ph,
+            queen_at,
+            &ant_at,
             target,
             "05-after-tap",
         );
@@ -952,6 +1041,9 @@ pub fn run_colony_capture(
             &stats,
             &brood,
             &live,
+            &ph,
+            queen_at,
+            &ant_at,
             target,
             "06-mid-shake",
         );
@@ -967,6 +1059,9 @@ pub fn run_colony_capture(
             &stats,
             &brood,
             &live,
+            &ph,
+            queen_at,
+            &ant_at,
             target,
             "07-settled",
         );
@@ -1107,6 +1202,9 @@ fn shoot_colony(
     stats: &crate::ants::ColonyStats,
     brood: &crate::brood::BroodStats,
     live: &Census,
+    ph: &Pheromones,
+    queen_at: Option<Vec2>,
+    ant_at: &[Vec2],
     target: &Handle<Image>,
     name: &str,
 ) {
@@ -1143,7 +1241,12 @@ fn shoot_colony(
     // From the world rather than from the counters above. A colony with no queen is the end of
     // the farm and has to be legible as that, not as a report that stopped changing.
     let (tallest, wide) = mound_profile(grid);
-    info!("    heap: {tallest} cells tall over {wide} columns");
+    let (open, room) = open_and_room(grid);
+    let (peak, mean, at_queen) = crowd_readings(ph, queen_at, ant_at);
+    info!(
+        "    heap: {tallest} cells tall over {wide} columns | open {open}, of which room {room}",
+    );
+    info!("    crowd: peak {peak:.2} | mean {mean:.2} | at the queen {at_queen:.2}");
     info!(
         "    live: {} queens, {} brood ({} held) | went nowhere in {STALL_WINDOW}s: {} = {} nurses, {} diggers, {} surface ({} above the cap) | STUCK for {}s+: {}",
         live.queens,

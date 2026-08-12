@@ -38,9 +38,23 @@ pub enum Ph {
     /// Signals the queen is alive and where she is. Workers drift up it, which is why
     /// a colony visibly clusters around her. When she dies it fades, and they know.
     Queen = 2,
+    /// How crowded it is here: laid down continuously by every ant and every brood item, and
+    /// read by anybody deciding whether to dig.
+    ///
+    /// This is the field that tells excavation when to stop, and the reason it can is the
+    /// no-flux boundary in [`diffuse_pheromones`]. A signal cannot cross sand, so in a cramped
+    /// chamber it has nowhere to go and builds up, while in a roomy nest it spreads thin. The
+    /// concentration therefore *is* bodies per unit of open space, which is what crowding means
+    /// — and it needs no census, no radius search and no per-ant neighbour list.
+    ///
+    /// Real ants do this. Excavation in *Lasius* responds to worker density and to the CO₂ that
+    /// accumulates where a colony is packed into too little room; a nest stops growing when it
+    /// is big enough for the colony in it, which is the behaviour three separate faults in this
+    /// game were missing.
+    Crowd = 3,
 }
 
-pub const PH_LAYERS: usize = 3;
+pub const PH_LAYERS: usize = 4;
 const LAYER_LEN: usize = GRID_W * GRID_H;
 
 /// Diffusion coefficient and evaporation per second, per layer.
@@ -52,6 +66,11 @@ const PH_PARAMS: [(f32, f32); PH_LAYERS] = [
     (0.22, 0.010), // Dig   — reach ~18 cells, a dig site stays attractive ~100s
     (0.22, 0.012), // Alarm — floods the nest, then calms over ~80s
     (0.15, 0.020), // Queen — reach ~11 cells, a tight cluster
+    // Crowd — reach ~8 cells, and it has to be short. A long reach would let one busy chamber
+    // license digging across the whole nest, which is the unconditional digging this replaces.
+    // Evaporation is fast enough that the field is "who is here now" rather than a history:
+    // a chamber emptied by a cohort growing up stops reading as crowded within a minute.
+    (0.12, 0.030),
 ];
 
 /// Below this a layer is treated as empty so it can be skipped entirely, which is what

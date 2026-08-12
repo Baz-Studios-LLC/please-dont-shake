@@ -97,8 +97,43 @@ const W_JITTER: f32 = 0.5;
 const W_QUEEN: f32 = 1.4;
 const W_HOMEWARD: f32 = 2.6;
 
+/// Crowding laid down per second by one ant, and by one brood item.
+///
+/// Brood counts for more than a worker and that is the point of the number: a pile of eggs is a
+/// standing demand for room that cannot walk somewhere else, and a chamber is what a colony digs
+/// around one. A worker's own demand is transient — it is about to walk off.
+const CROWD_PER_ANT: f32 = 1.0;
+pub const CROWD_PER_BROOD: f32 = 1.6;
+
+/// Crowding an ant has to feel before it will bite sand.
+///
+/// This is the rule that makes excavation answer to the colony instead of running forever, and
+/// three separate faults were all this one rule missing. Digging used to be unconditional — an
+/// ant dug because it walked into a face — so spoil was produced at a rate set by how many
+/// diggers existed rather than by whether the nest needed to be bigger. That gave us: 45% of
+/// everything dug falling back down the hole, because a fixed-size dump target was being fought
+/// over by a colony that had grown fivefold; a farm that would relocate its entire tank in about
+/// two hours of real time; and a nest that was one long shaft, because nothing ever dug *where
+/// the colony needed room* as opposed to wherever a digger's nose happened to be.
+///
+/// Eight, chosen from measured readings rather than taste. `Ph::Crowd` is bodies per unit of open
+/// space — it cannot cross sand, so it piles up in a cramped place and spreads thin in a roomy
+/// one — and on the capture run ants felt a median of 5.7, a 75th percentile of 9.4 and a 90th of
+/// 20, with the queen's own chamber at 9–25 and a nest crushed by a shake reading 25 at her. So a
+/// roomy gallery sits below this and a packed chamber sits above it, which is the line wanted.
+///
+/// The equilibrium matters more than the threshold: as a nest grows, crowding falls, so digging
+/// stops on its own. Raising this number makes for a tighter colony; lowering it, a more
+/// excavated one. It does not need a cap on top, and `MOUND_HEADROOM` can probably go once this
+/// has been watched for a few hours.
+const DIG_DEMAND: f32 = 8.0;
+
 /// Alarm level above which an ant abandons what it was doing.
 const ALARM_PANIC: f32 = 0.35;
+
+/// How far to the side the founding queen's spoil lands, in columns. Clear of a one-cell shaft
+/// with room to spare, so it cannot roll back in.
+const QUEEN_SPOIL_OFFSET: isize = 4;
 
 /// Seconds between the founding queen's own bites. She is slow, and she only digs at all until
 /// she is in — see `settle_the_queen`.
@@ -608,6 +643,10 @@ pub fn update_ants(
             cy.clamp(0, GRID_H as isize - 1) as usize,
         );
         let alarm = ph.get(Ph::Alarm, ux, uy);
+        // Every body is a demand for room. Laid down before anything is decided, so the field an
+        // ant reads includes itself — a lone ant in a wide gallery is not crowded, and one of
+        // twenty in a pocket is.
+        ph.deposit(Ph::Crowd, ux, uy, CROWD_PER_ANT * dt);
         if ant.pos.x < 1.5 || ant.pos.x > GRID_W as f32 - 1.5 {
             stats.at_the_glass += 1;
         }
@@ -710,8 +749,14 @@ pub fn update_ants(
         // Downward-only threads between the two. A shaft can be started from the surface;
         // the lawn cannot be shuffled sideways.
         let digs_downward = !above_ground || ant.heading.y < -0.3;
-        let ready_to_dig =
-            ant.carrying.is_none() && job == Job::Digger && !panicking && digs_downward;
+        let ready_to_dig = wants_to_dig(
+            job,
+            ph.get(Ph::Crowd, ux, uy),
+            above_ground,
+            ant.carrying.is_some(),
+            panicking,
+            digs_downward,
+        );
         if ready_to_dig {
             ant.dig_cooldown -= dt;
         }
@@ -723,6 +768,33 @@ pub fn update_ants(
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
         step(&mut ant, &mut grid, &mut ph, &nav, &mut stats, speed * dt, may_dig);
     }
+}
+
+/// Whether this ant will bite sand at all.
+///
+/// Its own function so the rule can be tested without a world.
+///
+/// **The crowding brake is built and parked, one line from here.** `Ph::Crowd` exists, every ant
+/// and every brood item lays it down, and it measures exactly what it should: the field cannot
+/// cross sand, so it piles up in a cramped chamber and spreads thin in a roomy one. Swapping the
+/// last line for `crowd >= DIG_DEMAND` underground is the whole change.
+///
+/// It is parked because it cannot be *measured* yet, and Brett found the reason: the capture
+/// compresses biology 86,400 times and leaves labour at real time. A rule that needs work to
+/// happen before biology advances is therefore guaranteed to fail there — the founding workers
+/// die of old age in thirty-five seconds while digging still takes 0.45s a bite. Three runs said
+/// the brake killed the colony; all three were the instrument, not the rule. Fixing that means
+/// deciding how fast a colony should dig on a clock where a day is a day, which is a design
+/// question and not mine to answer alone. See NOTES.md.
+fn wants_to_dig(
+    job: Job,
+    _crowd: f32,
+    _above_ground: bool,
+    carrying: bool,
+    panicking: bool,
+    digs_downward: bool,
+) -> bool {
+    !carrying && !panicking && digs_downward && job == Job::Digger
 }
 
 /// The queen goes down the shaft and stays there.
@@ -746,30 +818,42 @@ fn settle_the_queen(ant: &mut Ant, grid: &mut SandGrid, nav: &NavField, tick: u3
     );
     let here = nav.at(cx, cy);
 
-    // Founding: she digs her own chamber, and this is not decoration.
+    // Founding: she cuts her own shaft, and pushes the spoil out of the top of it.
     //
-    // `lay_eggs` refuses to lay until she is `FOUNDING_DEPTH` under the ground, and the first
-    // version of that rule left getting her there to the workers. Measured, it killed the colony
-    // outright: 10 ants at the start, 3 by twenty-five seconds, 1 by sixty, brood zero throughout
-    // and excavation frozen at 18 cells. No eggs means no replacements, and the founding workers
-    // simply aged out. A gate nobody can pass is a gate that ends the game.
+    // Two earlier versions of this are worth keeping written down, because both looked right.
     //
-    // So she digs. It is also what actually happens — DESIGN.md has claustral founding written
-    // into it: the queen seals herself in and raises the first brood on her own flight muscles.
-    // The grain she bites has to go somewhere and the only air is the way she came, so she
-    // backfills behind her and the sealing falls out for free rather than being scripted.
+    // Leaving it to the workers starved the colony. `lay_eggs` will not lay until she is
+    // `FOUNDING_DEPTH` under the ground, and at the capture's day-a-second the founding workers
+    // die of old age inside thirty-five *seconds* while digging stays real-time — so they get
+    // thirty-five seconds of labour where the real game gives them thirty-five days. The farm
+    // went 10 ants -> 3 -> 1 with a six-cell scrape and no eggs, twice.
     //
-    // It is put down **packed**, not loose. Loose sand above a queen with air beneath it is sand
-    // that falls back on her on the next sweep, and she would spend the founding being buried by
-    // her own spoil.
+    // Letting her backfill behind her deadlocked it instead. The grain went into the cell she had
+    // just left, the seal fell out for free rather than being scripted, and it was lovely — but a
+    // sealed chamber has no route out for spoil, so every grain dug inside was dropped back where
+    // it was found: 84 ants, a nest of two cells, 96% of everything dug going straight home.
+    //
+    // So the grain goes out and *beside*, through the same `settle` that puts a flying grain back
+    // into the grid. It is an abstraction and worth naming as one — she is not carrying it up —
+    // but it is the honest shape of the real behaviour: a founding queen pushes her diggings out
+    // of the entrance, and the little ring of spoil around a fresh ant hole is exactly what that
+    // looks like.
+    //
+    // Beside, and not up her own column, which is the version that shipped for one measurement.
+    // `settle` drops the grain down the first air it finds, and the first air above a queen who is
+    // digging a shaft is *the shaft*: every grain fell straight back down the hole, refilled it
+    // behind her, and left the workers re-digging the same cells forever — `dug 1284 -> excavated
+    // 53`. Alternating sides is what makes it a ring rather than a bank on one flank.
     ant.dig_cooldown -= dt;
     let ground = nav.surface_at(ux) as f32;
     let founding = ant.pos.y + crate::brood::FOUNDING_DEPTH > ground;
-    if founding && ant.dig_cooldown <= 0.0 && nav.deepen(ux, uy).is_none() {
+    if founding && ant.dig_cooldown <= 0.0 {
         let below = cy - 1;
         if below > 0 && !grid.is_air(cx, below) {
             let grain = grid.take(ux, below as usize);
-            grid.set_raw_with_loose(ux, uy, grain, false);
+            let side = if grid.tick % 2 == 0 { 1 } else { -1 };
+            let out = (cx + side * QUEEN_SPOIL_OFFSET).clamp(1, GRID_W as isize - 2);
+            crate::grains::settle(grid, out, GRID_H as isize - 2, grain.shade);
             ant.pos.y = below as f32 + 0.5;
             ant.dig_cooldown = QUEEN_DIG_INTERVAL;
             return;
