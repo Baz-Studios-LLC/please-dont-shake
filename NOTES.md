@@ -7,7 +7,7 @@ the design and the locked decisions; this holds the state of play and the traps.
 
 | repo | what | state |
 |---|---|---|
-| `Baz-Studios-LLC/please-dont-shake` | this game | public, `main`, tag `v0.1.0` |
+| `Baz-Studios-LLC/please-dont-shake` | this game | public, `main`, tag `v0.3.1` |
 | `Baz-Studios-LLC/Ordo` | UI kit — owns the radial menu widget | pinned by rev in Cargo.toml |
 | `Baz-Studios-LLC/baz-studios-launcher` | distribution | catalog row + art added, v0.1.21 |
 
@@ -32,9 +32,10 @@ about a pile.
 **M2 (the colony) works.** Ants dig from flat sand, haul spoil, and mass stays exact across
 all three places a grain can hide — grid, particle, mandibles.
 
-The hauling rate is *not* the problem the earlier notes claimed. Measured with the mound
-counted as well as the hole, on a colony run that holds one queen throughout (2026-08-11,
-101 ants at 100s, 125 colony days):
+The hauling rate **is** a problem, and this file has been wrong about it three times. Kept in
+order, because the sequence is the lesson. First, with the mound counted as well as the hole, on
+a run holding one queen throughout (2026-08-11) — this is where 16% comes from, and it was taken
+before the pacing fix, on a colony that had stopped working:
 
 | stage | dug | excavated | mound | returned | sand |
 |---|---|---|---|---|---|
@@ -110,9 +111,9 @@ Anything that photographs UI has to keep the camera on the window *and* skip the
 target — see `ui_shot` in main.rs. The hand and settings runs also fake their input at the
 same seam a touchscreen would use, because an unattended run has no cursor at all.
 
-The output directory has to exist — the harness won't create it, and a missing one shows
-up only as `Cannot save screenshot` buried in the log while every number still prints
-happily.
+The harness makes its own output directory now. It did not, and a missing one showed up only as
+`Cannot save screenshot` buried in the log while every number printed happily — a run that looks
+completely successful and has no pictures in it. Cost a whole run before it was fixed.
 
 **Capture mode never reads or writes the farm on disk.** Loading one would put a colony
 into a measurement meant to start from bare strata, and saving one would replace somebody's
