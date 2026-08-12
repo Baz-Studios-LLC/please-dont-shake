@@ -100,6 +100,22 @@ const W_HOMEWARD: f32 = 2.6;
 /// Alarm level above which an ant abandons what it was doing.
 const ALARM_PANIC: f32 = 0.35;
 
+/// The queen's pace, walking in and then pottering about once she is in. She is the largest
+/// thing in the tank and she is not going anywhere in a hurry.
+const QUEEN_WALK_SPEED: f32 = 4.0;
+const QUEEN_SHUFFLE_SPEED: f32 = 1.1;
+
+/// Ticks between the queen choosing a new direction to shuffle in — about three seconds.
+const QUEEN_TURN_TICKS: u32 = 180;
+
+/// How far the queen will stray from the deepest point she can reach, in flood steps.
+///
+/// Zero would freeze her: at a local maximum every neighbour is strictly shallower, so a rule
+/// that only permitted equal-or-deeper steps would permit nothing at all, and she would be a
+/// statue again by a different route. A few steps of slack gives her a chamber to potter in
+/// without letting her wander back out of it.
+const QUEEN_LEEWAY: u16 = 3;
+
 /// Ticks a wander direction is held for. At 60 Hz this is a bit under half a second.
 ///
 /// The number is a compromise between two ways of being wrong, and both were live at once.
@@ -619,9 +635,10 @@ pub fn update_ants(
         }
         ant.vel = Vec2::ZERO;
 
-        // The queen doesn't wander. She sits deep and signals that she's alive.
+        // The queen walks in, then stays in. She is also the only ant that never digs.
         if is_queen {
             ph.deposit(Ph::Queen, ux, uy, 2.0 * dt);
+            settle_the_queen(&mut ant, &grid, &nav, tick, dt);
             continue;
         }
 
@@ -694,6 +711,56 @@ pub fn update_ants(
         let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0;
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
         step(&mut ant, &mut grid, &mut ph, &nav, &mut stats, speed * dt, may_dig);
+    }
+}
+
+/// The queen goes down the shaft and stays there.
+///
+/// She had no movement code at all. The comment beside the branch said "she sits deep" and
+/// nothing ever got her deep: she was poured out of the tube, fell onto the sand, and spent the
+/// colony's whole life on the surface. That is not only wrong to look at — she *is* the `Queen`
+/// pheromone source, so the nurses gathered on top of the sand and `lay_eggs` put the brood pile
+/// out in the open, where the first shake scatters it. The nest had its centre outside itself.
+///
+/// Two states and no plan. If anything next to her is deeper, walk that way, favouring down.
+/// If nothing is, potter within a few steps of where she is. She never digs, so she can only
+/// occupy what the workers have already opened — which means the queen going deep is a thing
+/// the colony achieves for her rather than a scripted move, and on a farm nobody has dug yet
+/// she simply waits on the surface, correctly.
+fn settle_the_queen(ant: &mut Ant, grid: &SandGrid, nav: &NavField, tick: u32, dt: f32) {
+    let (cx, cy) = cell_of(ant.pos);
+    let (ux, uy) = (
+        cx.clamp(0, GRID_W as isize - 1) as usize,
+        cy.clamp(0, GRID_H as isize - 1) as usize,
+    );
+    let here = nav.at(cx, cy);
+
+    let (speed, want) = match nav.deepen(ux, uy) {
+        // Downward as well as inward: a plain flood-climb will happily follow a side pocket
+        // that happens to be a step deeper, and a founding *Lasius* queen goes down.
+        Some(inward) => (
+            QUEEN_WALK_SPEED,
+            (inward + Vec2::NEG_Y * 0.6).normalize_or(inward),
+        ),
+        None => (
+            QUEEN_SHUFFLE_SPEED,
+            Vec2::from_angle(
+                hash01(ux as u32, uy as u32, 0x9D11 ^ tick / QUEEN_TURN_TICKS)
+                    * std::f32::consts::TAU,
+            ),
+        ),
+    };
+
+    ant.heading = want;
+    let target = ant.pos + want * speed * dt;
+    let (tx, ty) = cell_of(target);
+    let there = nav.at(tx, ty);
+
+    // Deeper is always allowed; shallower only within the leeway. `UNREACHABLE` means she is
+    // standing in sand that just fell on her, and `can_stand` is what handles that.
+    let stays_in = there == UNREACHABLE || there + QUEEN_LEEWAY >= here;
+    if stays_in && can_stand(grid, nav, target, ant.pos.y) {
+        ant.pos = target;
     }
 }
 

@@ -924,7 +924,19 @@ pub struct Census {
     /// A nurse that has reached the brood is *supposed* to stay on it, and counting her as a
     /// fault would have me chasing the colony working correctly.
     stalled_by_job: [usize; 3],
+    /// Workers that have gone nowhere for [`STUCK_WINDOWS`] samples running.
+    ///
+    /// This is the one that answers "are any ants actually stuck", and it exists because a single
+    /// four-second sample cannot tell a pause from a prison. The instantaneous count swings
+    /// between 1 and 32 on a healthy run, which is what an idle reserve looks like when you
+    /// photograph it; a *sustained* count is a bug. Before the wander was given a clock this read
+    /// nearly half the colony, every sample, for the whole run.
+    stuck: usize,
 }
+
+/// Consecutive stalled samples before an ant is called stuck rather than idle. Three windows is
+/// twelve seconds of having gone nowhere at all.
+const STUCK_WINDOWS: u8 = 3;
 
 /// How long an ant is given to get somewhere before it counts as stuck, and how far it has to
 /// have gone. Four seconds of walking is fifty-odd cells; a cell and a half is nothing.
@@ -935,7 +947,7 @@ const STALL_DISTANCE: f32 = 1.5;
 pub fn take_census(
     mut census: ResMut<Census>,
     time: Res<Time>,
-    mut watch: Local<std::collections::HashMap<Entity, Vec2>>,
+    mut watch: Local<std::collections::HashMap<Entity, (Vec2, u8)>>,
     mut since: Local<f32>,
     ants: Query<&crate::ants::Ant>,
     workers: Query<(Entity, &crate::ants::Ant), Without<crate::ants::Queen>>,
@@ -943,7 +955,8 @@ pub fn take_census(
     pile: Query<&crate::brood::Brood>,
     grains: Query<(), With<crate::grains::Grain>>,
 ) {
-    let (stalled, stalled_high) = (census.stalled, census.stalled_high);
+    let (stalled, stalled_high, stalled_by_job, stuck) =
+        (census.stalled, census.stalled_high, census.stalled_by_job, census.stuck);
     *census = Census {
         ants: ants.iter().count(),
         carrying: ants.iter().filter(|ant| ant.carrying.is_some()).count(),
@@ -955,6 +968,8 @@ pub fn take_census(
         // zero on every frame that isn't a sampling frame.
         stalled,
         stalled_high,
+        stalled_by_job,
+        stuck,
     };
 
     *since += time.delta_secs();
@@ -967,10 +982,16 @@ pub fn take_census(
     let mut stalled = 0;
     let mut high = 0;
     let mut by_job = [0usize; 3];
+    let mut stuck = 0;
+    let mut next = std::collections::HashMap::with_capacity(watch.len());
     for (entity, ant) in &workers {
-        if let Some(was) = watch.get(&entity)
-            && ant.pos.distance(*was) < STALL_DISTANCE
-        {
+        // An ant nobody has seen before starts its streak at zero, which is right: it has not
+        // yet had a window in which to fail to move.
+        let (was, streak) = watch.get(&entity).copied().unwrap_or((ant.pos, 0));
+        let went_nowhere = watch.contains_key(&entity) && ant.pos.distance(was) < STALL_DISTANCE;
+        let streak = if went_nowhere { streak.saturating_add(1) } else { 0 };
+
+        if went_nowhere {
             stalled += 1;
             if ant.pos.y > cap {
                 high += 1;
@@ -981,13 +1002,16 @@ pub fn take_census(
                 crate::ants::Job::Surface => 2,
             }] += 1;
         }
+        if streak >= STUCK_WINDOWS {
+            stuck += 1;
+        }
+        next.insert(entity, (ant.pos, streak));
     }
     census.stalled = stalled;
     census.stalled_high = high;
     census.stalled_by_job = by_job;
-
-    watch.clear();
-    watch.extend(workers.iter().map(|(entity, ant)| (entity, ant.pos)));
+    census.stuck = stuck;
+    *watch = next;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1037,7 +1061,7 @@ fn shoot_colony(
     // From the world rather than from the counters above. A colony with no queen is the end of
     // the farm and has to be legible as that, not as a report that stopped changing.
     info!(
-        "    live: {} queens, {} brood ({} held) | went nowhere in {STALL_WINDOW}s: {} = {} nurses, {} diggers, {} surface ({} above the cap)",
+        "    live: {} queens, {} brood ({} held) | went nowhere in {STALL_WINDOW}s: {} = {} nurses, {} diggers, {} surface ({} above the cap) | STUCK for {}s+: {}",
         live.queens,
         live.brood,
         live.held,
@@ -1046,6 +1070,8 @@ fn shoot_colony(
         live.stalled_by_job[1],
         live.stalled_by_job[2],
         live.stalled_high,
+        STALL_WINDOW * STUCK_WINDOWS as f32,
+        live.stuck,
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",

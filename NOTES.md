@@ -291,6 +291,48 @@ under the old hour-per-day rate, because that increment was 24× larger and stay
 single-precision step. `a_worker_ages_a_day_in_a_day_at_any_age` in `src/ants.rs` guards it,
 and it starts the sum at thirty days rather than zero, which is the entire point of the test.
 
+## Reading the stall metric, and why zero is the wrong target
+
+`went nowhere in 4s` in the capture report is the honest stuck-detector: has this worker moved a
+cell and a half in four seconds? It replaced `stuck now`, which counts an ant whose eight
+candidate steps were all refused on a single tick — true, cheap, and blind to the failure that
+actually happens, where an ant has a legal step every tick and paces between two cells forever.
+`stuck now` read **zero** on a run where 45 of 100 ants were going nowhere.
+
+**Do not drive this number to zero.** DESIGN.md: *most ants are idle most of the time; if every
+ant is busy it reads as a factory, not a colony.* Real *Lasius* keeps a large inactive reserve, so
+a third of the workforce standing about is the farm being right. That is why the report breaks it
+down by job — a nurse that has reached the brood is *supposed* to sit on it; a stalled digger is
+not.
+
+The number that says the colony is alive is **excavation still climbing**, with hauling non-zero.
+When it froze at 98 cells across two reports forty seconds apart, that was the bug. Read the two
+together or you will chase the wrong one.
+
+## The queen goes down the shaft now
+
+She had no movement code at all — the branch deposited `Ph::Queen` and `continue`d, under a comment
+claiming she "sits deep". Nothing got her deep. She was poured out of the tube, fell onto the sand,
+and stayed on the surface for the colony's whole life; and because she is the `Queen` pheromone
+source, the nurses gathered up there and `lay_eggs` put the brood pile out in the open where the
+first shake scatters it. The nest's centre was outside the nest.
+
+`settle_the_queen` is two states and no plan. If anything adjacent is deeper she walks that way,
+favouring down; if nothing is, she potters within `QUEEN_LEEWAY` steps of where she stands. Deeper
+is `NavField::deepen`, the mirror of `descend` — the flood is walking distance from open sky, so
+climbing it is walking into the burrow, and the deepest reachable cell is the innermost chamber.
+Nothing stores where the chamber *is*; there is no such variable and there should not be. The
+ants' diggings say.
+
+She never digs, so she can only occupy what the workers have opened. The queen getting deep is
+therefore something the colony achieves for her, and on a farm nobody has dug yet she waits on the
+surface, which is correct rather than broken.
+
+Two traps, both now covered by tests in `pheromones.rs`: `UNREACHABLE` is `u16::MAX`, so an inward
+step that compares distances without excluding it calls every wall the deepest place in the tank
+and walks her into one; and a `QUEEN_LEEWAY` of zero freezes her, because at a local maximum every
+neighbour is strictly shallower and an equal-or-deeper rule permits nothing at all.
+
 ## The two queens, and what it cost to find them
 
 Solved, and worth reading before trusting any old colony measurement. The capture run used to

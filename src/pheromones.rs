@@ -343,6 +343,33 @@ impl NavField {
         y > ground && y <= ground + 2 && self.mouth_clearance(x) >= MOUND_CLEARANCE
     }
 
+    /// Step *inward*, toward the innermost air the nest has — or `None` if nothing adjacent is
+    /// deeper.
+    ///
+    /// The mirror of [`Self::descend`], and it costs nothing extra because of what the flood
+    /// already means: `dist` is how far a walk from open sky is, so climbing it is walking into
+    /// the burrow. The deepest reachable cell is the innermost chamber, and the colony gets a
+    /// route to it without anybody storing where "the chamber" is — there is no such variable,
+    /// and there shouldn't be. It's the ants' diggings that say.
+    pub fn deepen(&self, x: usize, y: usize) -> Option<Vec2> {
+        let here = self.at(x as isize, y as isize);
+        if here == UNREACHABLE {
+            return None;
+        }
+        let mut best = here;
+        let mut dir = Vec2::ZERO;
+        for (dx, dy) in NEIGHBOURS_8 {
+            let d = self.at(x as isize + dx, y as isize + dy);
+            // `UNREACHABLE` is solid sand, not somewhere deep. Reading it as the deepest place
+            // available would send anything following this straight into a wall.
+            if d != UNREACHABLE && d > best {
+                best = d;
+                dir = Vec2::new(dx as f32, dy as f32);
+            }
+        }
+        (dir != Vec2::ZERO).then(|| dir.normalize())
+    }
+
     /// Downhill step toward open sky, or `None` at a dead end.
     pub fn descend(&self, x: usize, y: usize) -> Option<Vec2> {
         let here = self.at(x as isize, y as isize);
@@ -378,6 +405,80 @@ pub const NEIGHBOURS_8: [(isize, isize); 8] = [
     (-1, 1),
     (-1, -1),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    /// A tank filled to `fill`, with a one-cell shaft cut down the middle to `floor`.
+    fn tank_with_a_shaft(fill: usize, floor: usize) -> SandGrid {
+        let mut grid = SandGrid::new();
+        for x in 0..GRID_W {
+            for y in 0..fill {
+                grid.set_raw(x, y, Cell { mat: Substance::Sand, shade: 0 });
+            }
+        }
+        for y in floor..fill {
+            grid.set(GRID_W / 2, y, Cell::AIR);
+        }
+        grid
+    }
+
+    fn flood(grid: SandGrid) -> NavField {
+        let mut world = World::new();
+        world.insert_resource(grid);
+        world.insert_resource(NavField::new());
+        world.run_system_once(rebuild_nav_field).unwrap();
+        world.remove_resource::<NavField>().unwrap()
+    }
+
+    /// The queen's whole route is this function, so it has to lead *in* and then stop.
+    ///
+    /// Down the shaft is deeper by definition — the flood measures walking distance from open
+    /// sky — and the bottom of it is the deepest air in the tank, where there is nowhere further
+    /// to go. If this ever inverted, the queen would climb out of the nest to found her colony
+    /// in the open air and every symptom would look like a rendering problem.
+    #[test]
+    fn the_inward_step_leads_down_the_shaft_and_stops_at_the_bottom() {
+        let fill = 60;
+        let floor = 20;
+        let nav = flood(tank_with_a_shaft(fill, floor));
+        let x = GRID_W / 2;
+
+        // Partway down: the way inward is downward.
+        let step = nav.deepen(x, 40).expect("mid-shaft has somewhere deeper to go");
+        assert!(step.y < 0.0, "the inward step from mid-shaft pointed up: {step:?}");
+
+        // The bottom: nowhere deeper, which is what tells the queen she has arrived.
+        assert_eq!(nav.deepen(x, floor), None, "the shaft floor is not a dead end");
+
+        // And the flood agrees about which end is which.
+        assert!(
+            nav.at(x as isize, floor as isize) > nav.at(x as isize, (fill - 1) as isize),
+            "the bottom of the shaft is not deeper than its mouth",
+        );
+    }
+
+    /// Solid sand is not somewhere deep. `UNREACHABLE` is `u16::MAX`, so a version of this that
+    /// compared distances without excluding it would call every wall the deepest place in the
+    /// tank and walk the queen into one.
+    #[test]
+    fn the_inward_step_never_points_into_sand() {
+        let nav = flood(tank_with_a_shaft(60, 20));
+        let x = GRID_W / 2;
+        for y in [21, 30, 45, 58] {
+            if let Some(step) = nav.deepen(x, y) {
+                let (tx, ty) = ((x as f32 + step.x) as isize, (y as f32 + step.y) as isize);
+                assert_ne!(
+                    nav.at(tx, ty),
+                    UNREACHABLE,
+                    "from ({x}, {y}) the inward step pointed into solid sand",
+                );
+            }
+        }
+    }
+}
 
 pub fn rebuild_nav_field(mut nav: ResMut<NavField>, grid: Res<SandGrid>) {
     // Nothing has moved since the last flood, so there is nothing to redo. This is what
