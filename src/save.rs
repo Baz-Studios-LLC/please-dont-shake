@@ -671,6 +671,10 @@ mod tests {
             .insert_resource(crate::ants::stub_assets())
             .insert_resource(crate::brood::stub_assets())
             .init_resource::<ColonyClock>()
+            // The catch-up floods the grid before it lays, because a queen only lays once she is
+            // underground. Without the field here it bails on its first system and settles
+            // nothing — which is what the ageing assertion caught when that rule went in.
+            .init_resource::<crate::pheromones::NavField>()
             .init_resource::<AwaySpan>()
             .add_systems(Update, load_farm);
         let tank = next.world_mut().spawn(TankRoot).id();
@@ -739,6 +743,10 @@ mod tests {
             .insert_resource(crate::ants::stub_assets())
             .insert_resource(crate::brood::stub_assets())
             .init_resource::<ColonyClock>()
+            // The catch-up floods the grid before it lays, because a queen only lays once she is
+            // underground. Without the field here it bails on its first system and settles
+            // nothing — which is what the ageing assertion caught when that rule went in.
+            .init_resource::<crate::pheromones::NavField>()
             .init_resource::<AwaySpan>()
             .init_resource::<crate::ants::ColonyStep>()
             .init_resource::<crate::brood::BroodStats>()

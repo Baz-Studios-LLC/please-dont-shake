@@ -39,14 +39,31 @@ button_idle   = { srgb = [0.148, 0.108, 0.078] }
 button_hover  = { srgb = [0.242, 0.176, 0.122] }
 button_pressed = { srgb = [0.330, 0.238, 0.160] }
 
-# No [font] section on purpose.
+# The font we already ship, on every role.
 #
-# A generic family needs Bevy's `system_font_discovery` feature, and without it
-# text silently fails to render at all — which is a worse bug than plain type,
-# and one this project has already chased twice. Naming nothing leaves Bevy's
-# embedded default in place, which is what a game with no opinion about type
-# wants. When the sticker's hand-lettered face gets digitised it ships as a file
-# and goes on `display` as a `path`.
+# There was no [font] section here, and the reasoning still stands where it came
+# from: a generic *family* needs Bevy's `system_font_discovery` feature, and
+# without it text silently fails to render at all, which is a worse bug than
+# plain type and one this project has chased twice. A `path` to a file in our
+# own assets is the other case entirely — it either loads or it is a missing
+# asset, loudly.
+#
+# What naming nothing actually left in place was Bevy's embedded
+# `FiraMono-subset.ttf`: Fira Mono cut down to U+0020..U+007E. Every character
+# outside plain ASCII was therefore a missing-glyph box, and the dev panel put
+# two of them on screen — "Dev — F1" and "real time — a colony day takes a day".
+# The same trap the splash's © fell into, which is why this file is already in
+# the build.
+#
+# It is the same typeface Bevy embeds a subset of, so this changes coverage
+# rather than the look: 1350 glyphs instead of 95, em dash and © included.
+[font]
+# No `weight` on the bold role, deliberately. Fira Mono Medium is a static cut,
+# so a weight it wasn't drawn at is a request nothing can honour — a real bold
+# would be a second file and its own role.
+display      = { path = "fonts/FiraMono-Medium.ttf" }
+display_bold = { path = "fonts/FiraMono-Medium.ttf" }
+body         = { path = "fonts/FiraMono-Medium.ttf" }
 
 [metric]
 title_size  = 22.0

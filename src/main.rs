@@ -23,6 +23,7 @@ mod audio;
 mod away;
 mod brood;
 mod devcapture;
+mod devpanel;
 mod farm;
 mod grains;
 mod grid;
@@ -125,6 +126,7 @@ fn main() {
         .init_resource::<ColonyClock>()
         .init_resource::<ColonyStep>()
         .init_resource::<away::AwaySpan>()
+        .init_resource::<away::AwayReport>()
         .init_resource::<ants::ColonyStats>()
         .insert_resource(Pheromones::new())
         .insert_resource(NavField::new())
@@ -261,7 +263,25 @@ fn main() {
         // the clock's rate to turn "how long the app was shut" into colony-days. A flag applied
         // afterwards would convert that gap at real time and then run the farm fast.
         .add_systems(Startup, devcapture::apply_speed_flag.before(setup_tank))
-        .add_systems(Update, devcapture::speed_keys);
+        .add_systems(Update, devcapture::speed_keys)
+        // The dev panel — F1. The keys above already worked; what they had no way of doing was
+        // telling anybody, because `info!` goes to a terminal and this game is opened from a
+        // launcher. Everything it reads is measured only while it is up: the census sampler and
+        // the readout both sweep the grid, and an ambient game has to cost nothing when nobody
+        // is looking at the numbers.
+        .init_resource::<devpanel::DevPanel>()
+        .init_resource::<devpanel::SandBaseline>()
+        .init_resource::<devcapture::Census>()
+        .add_systems(
+            Update,
+            (
+                devpanel::toggle_dev_panel,
+                devpanel::sync_dev_panel,
+                (devcapture::take_census, devpanel::update_readout, devpanel::pause_key)
+                    .run_if(devpanel::panel_is_open),
+            )
+                .chain(),
+        );
 
     // Persistence, and deliberately not in capture mode.
     //
@@ -309,7 +329,8 @@ fn main() {
         || devcapture::splash_shot()
         || devcapture::wheel_shot()
         || devcapture::hand_shot()
-        || devcapture::settings_shot();
+        || devcapture::settings_shot()
+        || devcapture::panel_shot();
     let shell_shot = devcapture::title_shot() || devcapture::splash_shot();
     if devcapture::capture_mode() && !shell_shot {
         app.insert_state(GameState::Playing);
@@ -330,7 +351,9 @@ fn main() {
             app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
         }
 
-        if devcapture::settings_shot() {
+        if devcapture::panel_shot() {
+            app.add_systems(Update, devcapture::run_panel_shot);
+        } else if devcapture::settings_shot() {
             app.add_systems(Update, devcapture::run_settings_shot);
         } else if devcapture::hand_shot() {
             // Between the system that fills `Touch` in and the one that reads it, so the
@@ -351,7 +374,7 @@ fn main() {
             // The original M1 cohesion test, with no colony to disturb the numbers.
             app.add_systems(Update, devcapture::run_capture.before(tank_spring));
         } else {
-            app.init_resource::<devcapture::Census>().add_systems(
+            app.add_systems(
                 Update,
                 (devcapture::take_census, devcapture::run_colony_capture)
                     .chain()

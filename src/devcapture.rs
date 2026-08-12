@@ -106,6 +106,63 @@ pub fn settings_shot() -> bool {
     std::env::args().any(|a| a == "--settings-shot")
 }
 
+/// `--panel-shot` opens the dev panel over a live farm and photographs it.
+///
+/// The panel is a block of text over the tank, which makes it the one piece of chrome where a
+/// missing glyph is invisible to every test that isn't a picture: Bevy's embedded font stops at
+/// U+007E, so an em dash renders as a box and nothing in the type system minds. That is exactly
+/// how it shipped.
+pub fn panel_shot() -> bool {
+    std::env::args().any(|a| a == "--panel-shot")
+}
+
+pub fn run_panel_shot(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut dev: ResMut<crate::devpanel::DevPanel>,
+    mut placements: ResMut<crate::radial::PlacementQueue>,
+    mut speed: ResMut<ColonySpeed>,
+    mut clock: ResMut<crate::ants::ColonyClock>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+    let crossed = |at: f32| prev < at && cap.t >= at;
+
+    // Fast, so the readout has brood and diggings in it rather than an empty tank.
+    if prev == 0.0 {
+        clock.days_per_second = CAPTURE_DAYS_PER_SECOND;
+        speed.0 = SPEEDS.len() - 1;
+    }
+    // A colony. On a *threshold*, not on `prev == 0.0`, and that distinction cost a debugging
+    // detour: Bevy's first `Update` has a delta of zero, so `cap.t` is still 0.0 on the second
+    // frame and `prev == 0.0` fires twice. Two kits, two queens — the panel opened and said
+    // "queen 2 of them (want 1)", which is the tool catching the bug in the code that built it.
+    if crossed(0.3) {
+        let drop_at = Vec2::new(GRID_W as f32 * 0.5, (INITIAL_SURFACE + 2) as f32);
+        placements.0.push((crate::radial::StockItem::AntKit, drop_at));
+    }
+    if crossed(1.0) {
+        dev.open = true;
+    }
+    // Twice: once as it opens on a young colony, once after the farm has been dug into, so the
+    // numbers in the second frame are ones that had to be computed rather than defaults.
+    if crossed(1.6) {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(format!("{}/panel-1-open.png", cap.out_dir)));
+    }
+    if crossed(12.0) {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(format!("{}/panel-2-working.png", cap.out_dir)));
+    }
+    if crossed(13.0) {
+        exit.write(AppExit::Success);
+    }
+}
+
 const SETTINGS_SHOTS: [(f32, &str); 3] = [
     (1.4, "settings-1-video"),
     (2.4, "settings-2-audio"),
@@ -918,12 +975,12 @@ pub struct Census {
     /// rather than a report on an outcome. It reads zero on runs where ants sit on a mound doing
     /// nothing for a minute, because each tick they believe they are about to move. "Has it
     /// moved?" is the only question that matches what you see through the glass.
-    stalled: usize,
-    stalled_high: usize,
+    pub stalled: usize,
+    pub stalled_high: usize,
     /// The stalled ones broken down by job, because "went nowhere" is not the same as "stuck".
     /// A nurse that has reached the brood is *supposed* to stay on it, and counting her as a
     /// fault would have me chasing the colony working correctly.
-    stalled_by_job: [usize; 3],
+    pub stalled_by_job: [usize; 3],
     /// Workers that have gone nowhere for [`STUCK_WINDOWS`] samples running.
     ///
     /// This is the one that answers "are any ants actually stuck", and it exists because a single
@@ -931,7 +988,7 @@ pub struct Census {
     /// between 1 and 32 on a healthy run, which is what an idle reserve looks like when you
     /// photograph it; a *sustained* count is a bug. Before the wander was given a clock this read
     /// nearly half the colony, every sample, for the whole run.
-    stuck: usize,
+    pub stuck: usize,
 }
 
 /// Consecutive stalled samples before an ant is called stuck rather than idle. Three windows is

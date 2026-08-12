@@ -26,6 +26,7 @@ use bevy::prelude::*;
 
 use crate::ants::{Ant, AntAssets, ColonyStep, Job, Queen, body_bundle};
 use crate::grid::*;
+use crate::pheromones::NavField;
 use crate::tank::TankRoot;
 
 /// Colony-days in each stage. Six days from laying to a walking worker.
@@ -176,6 +177,25 @@ pub fn setup_brood_assets(
     });
 }
 
+/// How far below the ground the queen has to be before she will lay, in cells.
+///
+/// Not zero, and the panel is why: with "under the terrain" as the whole test she counted as
+/// founded standing in a one-cell scrape and the readout said `founded, 0 cells down, laying`,
+/// which is laying in the doorway rather than in a chamber — the same fault as laying on the
+/// lawn, moved by a cell.
+///
+/// Six is a judgement, not a measurement. A real founding chamber is a few centimetres down,
+/// which at 1.2mm a cell would be twenty-odd and would hold the colony's first egg behind a
+/// long dig; six is deep enough to be a chamber and shallow enough that a young colony gets
+/// there. Both `lay_eggs` and the dev panel read this constant, because when they each had
+/// their own idea of "underground" they disagreed on screen.
+pub const FOUNDING_DEPTH: f32 = 6.0;
+
+/// Which column the queen is standing in, clamped to the tank.
+fn queen_column(queen: &Ant) -> usize {
+    (queen.pos.x.max(0.0) as usize).min(GRID_W - 1)
+}
+
 /// The queen lays, if she has room for another.
 pub fn lay_eggs(
     mut commands: Commands,
@@ -183,6 +203,7 @@ pub fn lay_eggs(
     mut lay: ResMut<LayClock>,
     mut stats: ResMut<BroodStats>,
     assets: Option<Res<BroodAssets>>,
+    nav: Res<NavField>,
     tank: Query<Entity, With<TankRoot>>,
     queen: Query<&Ant, With<Queen>>,
     workers: Query<(), (With<Ant>, Without<Queen>)>,
@@ -198,6 +219,24 @@ pub fn lay_eggs(
     else {
         return;
     };
+
+    // Not on the lawn. A founding *Lasius* queen digs herself in, seals the chamber and lays in
+    // there; she does not lay on open sand, and eggs on the surface are eggs the weather and the
+    // first shake take. Brett asked whether that was normal and it is not — the code laid at
+    // `queen.pos` whatever `queen.pos` happened to be, which before she could move was wherever
+    // the tube dropped her.
+    //
+    // This makes the founding stage mean something: the colony has to open a hole and get her
+    // into it before it can grow at all. Nothing has to *decide* she is in, either — she is in
+    // when she is under the terrain, and her own descent is what puts her there.
+    let underground =
+        queen.pos.y + FOUNDING_DEPTH <= nav.surface_at(queen_column(&queen)) as f32;
+    if !underground {
+        // Held, not lost: the clock keeps running, so she lays as soon as she is in rather than
+        // waiting out another whole interval underground.
+        lay.0 = lay.0.min(LAY_INTERVAL);
+        return;
+    }
 
     lay.0 += step.0;
     if lay.0 < LAY_INTERVAL {

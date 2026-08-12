@@ -100,6 +100,10 @@ const W_HOMEWARD: f32 = 2.6;
 /// Alarm level above which an ant abandons what it was doing.
 const ALARM_PANIC: f32 = 0.35;
 
+/// Seconds between the founding queen's own bites. She is slow, and she only digs at all until
+/// she is in — see `settle_the_queen`.
+const QUEEN_DIG_INTERVAL: f32 = 1.1;
+
 /// The queen's pace, walking in and then pottering about once she is in. She is the largest
 /// thing in the tank and she is not going anywhere in a hurry.
 const QUEEN_WALK_SPEED: f32 = 4.0;
@@ -469,6 +473,13 @@ pub fn place_queued(
 
         match item {
             StockItem::AntKit => {
+                // A pour already running is not restarted. Assigning `remaining` over the top of
+                // one resets it to eleven mid-tip, which both tips in more ants than a kit holds
+                // and takes `remaining` back through the value that means "spawn the queen".
+                if pour.remaining > 0 {
+                    warn!("a kit was tipped in while one was still pouring; ignored");
+                    continue;
+                }
                 // Start a pour rather than spawning eleven ants at once. Tipping a tube
                 // into a farm is a stream, not a block arriving — see `pour_kit`.
                 pour.remaining = 1 + KIT_WORKERS;
@@ -638,7 +649,7 @@ pub fn update_ants(
         // The queen walks in, then stays in. She is also the only ant that never digs.
         if is_queen {
             ph.deposit(Ph::Queen, ux, uy, 2.0 * dt);
-            settle_the_queen(&mut ant, &grid, &nav, tick, dt);
+            settle_the_queen(&mut ant, &mut grid, &nav, tick, dt);
             continue;
         }
 
@@ -727,7 +738,7 @@ pub fn update_ants(
 /// occupy what the workers have already opened — which means the queen going deep is a thing
 /// the colony achieves for her rather than a scripted move, and on a farm nobody has dug yet
 /// she simply waits on the surface, correctly.
-fn settle_the_queen(ant: &mut Ant, grid: &SandGrid, nav: &NavField, tick: u32, dt: f32) {
+fn settle_the_queen(ant: &mut Ant, grid: &mut SandGrid, nav: &NavField, tick: u32, dt: f32) {
     let (cx, cy) = cell_of(ant.pos);
     let (ux, uy) = (
         cx.clamp(0, GRID_W as isize - 1) as usize,
@@ -735,7 +746,53 @@ fn settle_the_queen(ant: &mut Ant, grid: &SandGrid, nav: &NavField, tick: u32, d
     );
     let here = nav.at(cx, cy);
 
-    let (speed, want) = match nav.deepen(ux, uy) {
+    // Founding: she digs her own chamber, and this is not decoration.
+    //
+    // `lay_eggs` refuses to lay until she is `FOUNDING_DEPTH` under the ground, and the first
+    // version of that rule left getting her there to the workers. Measured, it killed the colony
+    // outright: 10 ants at the start, 3 by twenty-five seconds, 1 by sixty, brood zero throughout
+    // and excavation frozen at 18 cells. No eggs means no replacements, and the founding workers
+    // simply aged out. A gate nobody can pass is a gate that ends the game.
+    //
+    // So she digs. It is also what actually happens — DESIGN.md has claustral founding written
+    // into it: the queen seals herself in and raises the first brood on her own flight muscles.
+    // The grain she bites has to go somewhere and the only air is the way she came, so she
+    // backfills behind her and the sealing falls out for free rather than being scripted.
+    //
+    // It is put down **packed**, not loose. Loose sand above a queen with air beneath it is sand
+    // that falls back on her on the next sweep, and she would spend the founding being buried by
+    // her own spoil.
+    ant.dig_cooldown -= dt;
+    let ground = nav.surface_at(ux) as f32;
+    let founding = ant.pos.y + crate::brood::FOUNDING_DEPTH > ground;
+    if founding && ant.dig_cooldown <= 0.0 && nav.deepen(ux, uy).is_none() {
+        let below = cy - 1;
+        if below > 0 && !grid.is_air(cx, below) {
+            let grain = grid.take(ux, below as usize);
+            grid.set_raw_with_loose(ux, uy, grain, false);
+            ant.pos.y = below as f32 + 0.5;
+            ant.dig_cooldown = QUEEN_DIG_INTERVAL;
+            return;
+        }
+    }
+
+    // Toward the entrance while she is still outside, because `deepen` cannot help her there.
+    //
+    // The flood is distance from open sky, so *every* cell of open air above the sand is zero and
+    // nothing next to her is deeper: from the surface the inward step has no opinion at all. She
+    // was left shuffling at random until she happened to tread on the hole, which she managed
+    // once by luck — the kit had dropped her on the mouth — and the run after that she sat at
+    // ground level for the whole colony while the panel read `0 cells down, needs 6 to lay` and
+    // the brood stayed at nought. A queen who cannot find the door never founds.
+    //
+    // `nearest_mouth` already knows where the door is: haulers read it to walk *away* from it, so
+    // she reads the same thing and walks the other way.
+    let toward_mouth = || {
+        nav.away_from_mouth(ux)
+            .map(|away| Vec2::new(-away, -0.35).normalize())
+    };
+
+    let (speed, want) = match nav.deepen(ux, uy).or_else(toward_mouth) {
         // Downward as well as inward: a plain flood-climb will happily follow a side pocket
         // that happens to be a step deeper, and a founding *Lasius* queen goes down.
         Some(inward) => (
@@ -1187,6 +1244,7 @@ pub fn pour_kit(
     mut pour: ResMut<KitPour>,
     assets: Res<AntAssets>,
     tank: Query<Entity, With<TankRoot>>,
+    existing_queens: Query<(), With<Queen>>,
 ) {
     if pour.remaining == 0 {
         return;
@@ -1209,8 +1267,16 @@ pub fn pour_kit(
         (GRID_H - 2) as f32,
     );
 
-    // The queen leads, so the first thing in is the one that matters.
-    if pour.remaining == 1 + KIT_WORKERS {
+    // The queen leads, so the first thing in is the one that matters — unless the farm already
+    // has one, in which case this kit contributes a worker instead.
+    //
+    // One queen per farm is a locked design decision, and this is the only place a queen can be
+    // made, so this is where it belongs. It is not a hypothetical: a second queen makes
+    // `Query::single` fail, and `lay_eggs` and `tend_brood` both used to give up on that — the
+    // colony stopped laying and stopped tending, silently, forever. That cost weeks of wrong
+    // numbers. Those two now take the first queen instead of demanding exactly one, and this
+    // stops the second from existing at all. Both halves, because the failure was silent.
+    if pour.remaining == 1 + KIT_WORKERS && existing_queens.is_empty() {
         commands.spawn((queen_bundle(&assets, at), ChildOf(tank)));
     } else {
         // Spread ages so labour divides itself immediately: some nurses, some diggers,

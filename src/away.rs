@@ -39,6 +39,23 @@ use crate::settings::Settings;
 #[derive(Resource, Default)]
 pub struct AwaySpan(pub f64);
 
+/// What the catch-up did, kept so something can say so.
+///
+/// It used to say so only with `info!`, which goes to a terminal — and this game is opened from
+/// a launcher and a `.app`, where there is no terminal. So a hundred workers could arrive
+/// between the splash and the title screen with no way for anyone to find out where they came
+/// from, which is exactly the question it produced. The dev panel reads this.
+#[derive(Resource, Default)]
+pub struct AwayReport {
+    /// Colony-days settled up. Zero means nothing was owed, or the setting is off.
+    pub days: f64,
+    pub laid: u64,
+    pub hatched: u64,
+    pub died: u64,
+    /// Owed more than [`MAX_DAYS`], so the rest was written off.
+    pub capped: bool,
+}
+
 /// How much colony time one catch-up step covers.
 ///
 /// Comfortably below the shortest life stage (1.5 days, the pupa) so nothing skips one, and
@@ -99,6 +116,13 @@ pub fn catch_up_while_away(world: &mut World) {
         };
     }
 
+    // The flood, once, before the loop. `lay_eggs` asks it whether the queen is underground —
+    // she does not lay on open sand — and at startup the field is still empty, so every column
+    // reads as ground level zero and she is judged to be standing on the lawn. Without this the
+    // catch-up ages and kills a colony without ever laying an egg into it. Once is enough: no
+    // sand moves while nobody is walking on it.
+    run!(crate::pheromones::rebuild_nav_field);
+
     let mut left = days;
     while left > 0.0 {
         world.resource_mut::<ColonyStep>().0 = left.min(STEP_DAYS);
@@ -117,12 +141,18 @@ pub fn catch_up_while_away(world: &mut World) {
     world.resource_mut::<ColonyStep>().0 = 0.0;
 
     let stats = world.resource::<crate::brood::BroodStats>();
+    let report = AwayReport {
+        days,
+        laid: stats.laid - before.0,
+        hatched: stats.eclosed - before.1,
+        died: stats.died - before.2,
+        capped: days < owed,
+    };
     info!(
         "while you were away: {days:.1} days — {} laid, {} hatched, {} died of old age",
-        stats.laid - before.0,
-        stats.eclosed - before.1,
-        stats.died - before.2,
+        report.laid, report.hatched, report.died,
     );
+    world.insert_resource(report);
 }
 
 #[cfg(test)]
@@ -150,7 +180,16 @@ mod tests {
         let mut app = App::new();
         let settings = crate::settings::Settings { away: growing, ..default() };
         // A real grid, because `age_out` puts a dead hauler's grain back into it.
-        app.insert_resource(crate::grid::SandGrid::new())
+        // Sand to the queen's shoulders, so she counts as founded and lays. An empty tank is a
+        // tank with no ground in it, and a queen standing on nothing is a queen on the surface.
+        let mut grid = crate::grid::SandGrid::new();
+        crate::grid::fill_strata(&mut grid, 60);
+        for y in 30..60 {
+            grid.set(128, y, crate::grid::Cell::AIR);
+        }
+
+        app.insert_resource(grid)
+            .init_resource::<crate::pheromones::NavField>()
             .insert_resource(settings)
             .insert_resource(AwaySpan(away_days))
             .init_resource::<ColonyStep>()
@@ -162,6 +201,8 @@ mod tests {
         app.world_mut().spawn(TankRoot);
 
         let body = |age_days: f64| Ant {
+            // Down the shaft cut above, which is what makes her a founded queen rather than one
+            // sitting out on the sand.
             pos: Vec2::new(128.0, 40.0),
             heading: Vec2::X,
             vel: Vec2::ZERO,
