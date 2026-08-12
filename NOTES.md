@@ -47,6 +47,33 @@ in the heap. Earlier notes quoted 67%, then 9%, and both were read off runs wher
 had tipped in a *second* ant kit — see the two-queens section. Every colony number in this file
 before 2026-08-11 is suspect for that reason.
 
+**And 16% was still wrong, because the loss scales with the colony.** Brett reported spoil
+falling back into the hole and burying ants; measured over one run:
+
+| | ants | dug | excavated | fell back in | dropped *inside* the nest |
+|---|---|---|---|---|---|
+| 25s | 19 | 13 | 13 | 0 (0%) | 0 |
+| 60s | 72 | 181 | 105 | 41 (22%) | 26 |
+| 100s | 101 | 396 | 175 | 180 (45%) | 83 |
+
+At a hundred ants nearly half of everything dug goes back, and a quarter of all drops happen
+inside the nest. It is congestion, which is why it was invisible on the small colonies every
+earlier number was taken from: **never quote a hauling figure without the headcount beside it.**
+
+Two mechanisms, about half each. `HAUL_PATIENCE` drops a grain where the ant stands after 14s of
+failing to find a dump site — that backstop is what puts spoil in tunnels and on nestmates, and a
+buried ant emits alarm, and a panicking ant refuses to dig, so a bad drop costs more than a
+grain. The rest is spoil rolling home: drops are loose by design so they find their own angle,
+but the heap rings the mouth and the inside face of that ring slopes into the shaft.
+
+`is_dump_site` is a fixed-size target — open ground, own surface, 7 columns clear of the mouth —
+being competed for by a colony that grew fivefold. Widening it or extending patience moves the
+symptom. The cause is that digging is unconditional: an ant digs because it walked into a face,
+so spoil is produced at a rate set by how many diggers exist rather than by whether the nest
+needs to be bigger. That same rule is why the colony would relocate the whole tank in a couple of
+hours of real time, and why the nest is one shaft with no chambers in it. One rule, three
+symptoms — see "Not yet done".
+
 **Always read excavated and mound together, and never conclude anything from a single run** —
 the harness drives on real frame times, so variance is large.
 
