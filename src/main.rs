@@ -282,6 +282,15 @@ fn main() {
                     .run_if(devpanel::panel_is_open),
             )
                 .chain(),
+        )
+        // A line to the log every few minutes, whether anybody is looking or not. A long run is
+        // the only honest instrument the colony has, and it has to leave a record — see
+        // `devpanel::log_progress`.
+        .add_systems(
+            Update,
+            devpanel::log_progress.run_if(on_real_timer(Duration::from_secs(
+                devpanel::PROGRESS_MINUTES * 60,
+            ))),
         );
 
     // Persistence, and deliberately not in capture mode.

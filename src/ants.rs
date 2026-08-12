@@ -1289,6 +1289,10 @@ pub fn sync_ant_transforms(
 #[derive(Resource)]
 pub struct ColonyClock {
     pub days_per_second: f64,
+    /// Colony-days since this process started. Not saved: it is "how long have I been watching",
+    /// which is the question a long run is asking, and a farm's own age would be a different
+    /// number wanting a different home.
+    pub elapsed_days: f64,
 }
 
 /// How much colony time this step covers, in days. Everything biological reads this and
@@ -1321,10 +1325,11 @@ impl ColonyClock {
 /// One tick of colony time. First in the fixed schedule, so everything after it agrees.
 pub fn advance_colony_clock(
     time: Res<Time>,
-    clock: Res<ColonyClock>,
+    mut clock: ResMut<ColonyClock>,
     mut step: ResMut<ColonyStep>,
 ) {
     step.0 = time.delta_secs() as f64 * clock.days_per_second;
+    clock.elapsed_days += step.0;
 }
 
 /// Everybody gets older.
@@ -1353,7 +1358,7 @@ impl Default for ColonyClock {
         //
         // The scripted runs override this; see `CAPTURE_DAYS_PER_SECOND`. It is the only way a
         // two-minute test can say anything about a six-day life stage.
-        Self { days_per_second: 1.0 / 86_400.0 }
+        Self { days_per_second: 1.0 / 86_400.0, elapsed_days: 0.0 }
     }
 }
 

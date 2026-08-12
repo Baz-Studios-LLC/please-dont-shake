@@ -229,6 +229,71 @@ pub fn update_readout(
     );
 }
 
+/// One line every [`PROGRESS_MINUTES`], to the log.
+///
+/// The panel says what is true now, which is no use at three in the morning. A long run is the only
+/// honest instrument this simulation has — at the fastest faithful speed a brood cycle takes six
+/// real hours — so a run has to leave a record that can be read afterwards. Launched from the
+/// `.command`, this lands in the Terminal window; redirect it to a file and the night comes back as
+/// a table.
+///
+/// Columns are chosen so a single glance answers "is it alive, is it growing, is it leaking":
+/// colony days elapsed, headcount, brood, what the queen is doing, excavation, how much of the nest
+/// is *room* rather than corridor, and the sand drift, which must never move.
+pub fn log_progress(
+    clock: Res<crate::ants::ColonyClock>,
+    grid: Res<SandGrid>,
+    nav: Res<NavField>,
+    stats: Res<ColonyStats>,
+    brood: Res<BroodStats>,
+    mut baseline: ResMut<SandBaseline>,
+    ants: Query<&Ant>,
+    grains: Query<(), With<Grain>>,
+    queen: Query<&Ant, With<Queen>>,
+) {
+    let in_flight = grains.iter().count();
+    let carried = ants.iter().filter(|ant| ant.carrying.is_some()).count();
+    let sand = grid.sand_count() + in_flight + carried;
+    // Shares the panel's baseline on purpose: whichever asks first sets it, and both then measure
+    // drift from the same moment.
+    let base = *baseline.0.get_or_insert(sand);
+
+    let (open, room) = crate::devcapture::open_and_room(&grid);
+    let queen_state = match queen.single() {
+        Ok(her) => {
+            let column = (her.pos.x.max(0.0) as usize).min(GRID_W - 1);
+            let ground = nav.surface_at(column) as f32;
+            if her.pos.y + FOUNDING_DEPTH <= ground {
+                format!("in, {:.0} down", ground - her.pos.y)
+            } else {
+                format!("out, {:.0} down", (ground - her.pos.y).max(0.0))
+            }
+        }
+        Err(_) => "none".to_string(),
+    };
+
+    info!(
+        "day {:.2} | {} ants ({}n/{}d/{}s) | brood {} | queen {} | dug {} out, {} heaped | nest {} open, {} room | sand drift {:+} | idle {}",
+        clock.elapsed_days,
+        ants.iter().count(),
+        stats.nurses,
+        stats.diggers,
+        stats.surface,
+        brood.eggs + brood.larvae + brood.pupae,
+        queen_state,
+        excavated_volume(&grid),
+        mound_volume(&grid),
+        open,
+        room,
+        sand as i64 - base as i64,
+        stats.walled_in,
+    );
+}
+
+/// Real minutes between progress lines. Twelve an hour: enough to see a shape over a night, few
+/// enough that a week-long run does not fill a disk.
+pub const PROGRESS_MINUTES: u64 = 5;
+
 pub fn panel_is_open(dev: Res<DevPanel>) -> bool {
     dev.open
 }
