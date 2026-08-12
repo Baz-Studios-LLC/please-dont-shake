@@ -3,6 +3,24 @@
 The top section of this file becomes the release notes, and the launcher shows it as
 "What's New" — so it's written for whoever is about to play, not for whoever wrote it.
 
+## v0.3.1
+
+The colony gets back to work, and the queen goes where she belongs.
+
+- **The colony stopped working after about a minute, and now it doesn't.** Ants could fall into
+  pacing between two spots forever — walking the whole time, so it looked like ordinary
+  milling about, but never arriving anywhere. Since an ant only digs what it walks into, a
+  colony full of pacing diggers quietly stopped digging: the nest would grow for the first
+  minute and then stand still for as long as you watched it. Tapping the glass appeared to
+  fix it, briefly. The nest keeps growing now, and keeps rebuilding after a shake.
+- **The queen goes underground.** She walks down the shaft as the workers open it and settles
+  at the deepest point they've reached, instead of sitting on the surface for the colony's
+  whole life. The brood follows her down, so the eggs are in a chamber rather than out in the
+  open where a shake scatters them. A farm already in progress sorts itself out — she'll walk
+  down the next time you open it.
+- Ants standing about doing nothing is normal and stays: a real colony keeps most of its
+  workers idle most of the time, and one where everybody is busy reads as a factory.
+
 ## v0.3.0
 
 The colony has a reason to dig now, and its clock is the one you're on.
