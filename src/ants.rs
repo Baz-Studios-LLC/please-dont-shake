@@ -60,7 +60,7 @@ const SURFACE_ROAM: f32 = 3.0;
 /// current terrain. Without a fixed reference the two feed each other: spoil raises the
 /// terrain, the raised terrain lets ants climb higher, and from up there they stack more
 /// spoil. The colony builds a tower into the void instead of a mound.
-const MOUND_HEADROOM: f32 = 12.0;
+pub const MOUND_HEADROOM: f32 = 12.0;
 
 /// Sand agitation that shakes an ant off its footing. Above a tap, below a real shake —
 /// so tapping alarms the colony while shaking physically throws it around.
@@ -99,6 +99,23 @@ const W_HOMEWARD: f32 = 2.6;
 
 /// Alarm level above which an ant abandons what it was doing.
 const ALARM_PANIC: f32 = 0.35;
+
+/// Ticks a wander direction is held for. At 60 Hz this is a bit under half a second.
+///
+/// The number is a compromise between two ways of being wrong, and both were live at once.
+/// Re-rolled every tick, the noise becomes a random walk in heading: paths stop being
+/// coherent, and a digger that re-randomises hollows out a sphere instead of driving a shaft.
+/// Held forever — which is what keying it on *position alone* amounted to — the entire
+/// movement rule becomes a time-invariant function of position, and a time-invariant rule has
+/// fixed points. Ants found them: an ant at A wanted B, at B wanted A, and paced that
+/// two-cycle for the rest of its life. It never counted as stuck, because it moved every
+/// single tick.
+///
+/// Measured, at a hundred ants: 44 of them going nowhere over four seconds, and excavation
+/// frozen at 98 cells with 46 diggers on the books — a digger only bites what it walks into,
+/// and a pacing digger walks into nothing. A tap unfroze the colony for a few seconds because
+/// alarm is the one input that changes with time.
+const WANDER_TICKS: u32 = 24;
 
 /// Candidate turns, in radians, tried in order when the way ahead is blocked. Small
 /// deflections first, so an ant slides along a wall instead of bouncing off it — real
@@ -544,6 +561,8 @@ pub fn update_ants(
     mut ants: Query<(&mut Ant, Has<Queen>)>,
 ) {
     let dt = time.delta_secs();
+    // Read once, before the grid is borrowed mutably for digging.
+    let tick = grid.tick;
     stats.buried = 0;
     stats.falling = 0;
     stats.panicking = 0;
@@ -669,7 +688,8 @@ pub fn update_ants(
             ant.dig_cooldown -= dt;
         }
 
-        ant.heading = desired_heading(&ant, &ph, &nav, job, panicking, above_ground, ux, uy);
+        ant.heading =
+            desired_heading(&ant, &ph, &nav, job, panicking, above_ground, ux, uy, tick);
 
         let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0;
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
@@ -688,11 +708,15 @@ fn desired_heading(
     above_ground: bool,
     ux: usize,
     uy: usize,
+    tick: u32,
 ) -> Vec2 {
     let mut want = ant.heading * W_PERSIST;
 
+    // Where the ant is *and* roughly when. Position alone is a trap — see `WANDER_TICKS`.
     let jitter_seed = (ant.pos.x.abs() * 31.0) as u32 ^ (ant.pos.y.abs() * 17.0) as u32;
-    let jitter = Vec2::from_angle(hash01(jitter_seed, uy as u32, 0x51D3) * std::f32::consts::TAU);
+    let jitter = Vec2::from_angle(
+        hash01(jitter_seed, uy as u32, 0x51D3 ^ tick / WANDER_TICKS) * std::f32::consts::TAU,
+    );
 
     if panicking {
         // Alarm: run, mostly away from the disturbance, and stop being useful.

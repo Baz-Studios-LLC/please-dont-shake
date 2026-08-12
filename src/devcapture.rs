@@ -420,6 +420,12 @@ impl DevCapture {
             .skip_while(|a| a != "--out")
             .nth(1)
             .unwrap_or_else(|| ".".to_string());
+        // Bevy's screenshot writer will not make the directory, and when it can't find one it
+        // logs an IO error per frame and carries on — so a mistyped `--out` produces a run that
+        // looks entirely successful and has no pictures in it. Cost me a whole run.
+        if let Err(why) = std::fs::create_dir_all(&out_dir) {
+            warn!("could not make {out_dir}: {why}");
+        }
         Self { t: 0.0, out_dir, baseline: None, baseline_sand: 0 }
     }
 }
@@ -904,16 +910,40 @@ pub struct Census {
     queens: usize,
     brood: usize,
     held: usize,
+    /// Workers that have not gone anywhere in [`STALL_WINDOW`] seconds, and how many of those
+    /// are stranded above the roaming cap.
+    ///
+    /// `ColonyStats::walled_in` was supposed to be this and isn't: it counts an ant whose eight
+    /// candidate steps were *all* refused on a single tick, which is a snapshot of a decision
+    /// rather than a report on an outcome. It reads zero on runs where ants sit on a mound doing
+    /// nothing for a minute, because each tick they believe they are about to move. "Has it
+    /// moved?" is the only question that matches what you see through the glass.
+    stalled: usize,
+    stalled_high: usize,
+    /// The stalled ones broken down by job, because "went nowhere" is not the same as "stuck".
+    /// A nurse that has reached the brood is *supposed* to stay on it, and counting her as a
+    /// fault would have me chasing the colony working correctly.
+    stalled_by_job: [usize; 3],
 }
+
+/// How long an ant is given to get somewhere before it counts as stuck, and how far it has to
+/// have gone. Four seconds of walking is fifty-odd cells; a cell and a half is nothing.
+const STALL_WINDOW: f32 = 4.0;
+const STALL_DISTANCE: f32 = 1.5;
 
 /// Count what is in the tank. Before the report, every frame of a capture run.
 pub fn take_census(
     mut census: ResMut<Census>,
+    time: Res<Time>,
+    mut watch: Local<std::collections::HashMap<Entity, Vec2>>,
+    mut since: Local<f32>,
     ants: Query<&crate::ants::Ant>,
+    workers: Query<(Entity, &crate::ants::Ant), Without<crate::ants::Queen>>,
     queens: Query<(), With<crate::ants::Queen>>,
     pile: Query<&crate::brood::Brood>,
     grains: Query<(), With<crate::grains::Grain>>,
 ) {
+    let (stalled, stalled_high) = (census.stalled, census.stalled_high);
     *census = Census {
         ants: ants.iter().count(),
         carrying: ants.iter().filter(|ant| ant.carrying.is_some()).count(),
@@ -921,7 +951,43 @@ pub fn take_census(
         queens: queens.iter().count(),
         brood: pile.iter().count(),
         held: pile.iter().filter(|item| item.held_by.is_some()).count(),
+        // Carried between samples, so the report always has the last full answer rather than a
+        // zero on every frame that isn't a sampling frame.
+        stalled,
+        stalled_high,
     };
+
+    *since += time.delta_secs();
+    if *since < STALL_WINDOW {
+        return;
+    }
+    *since = 0.0;
+
+    let cap = INITIAL_SURFACE as f32 + crate::ants::MOUND_HEADROOM;
+    let mut stalled = 0;
+    let mut high = 0;
+    let mut by_job = [0usize; 3];
+    for (entity, ant) in &workers {
+        if let Some(was) = watch.get(&entity)
+            && ant.pos.distance(*was) < STALL_DISTANCE
+        {
+            stalled += 1;
+            if ant.pos.y > cap {
+                high += 1;
+            }
+            by_job[match crate::ants::Job::for_age(ant.age_days) {
+                crate::ants::Job::Nurse => 0,
+                crate::ants::Job::Digger => 1,
+                crate::ants::Job::Surface => 2,
+            }] += 1;
+        }
+    }
+    census.stalled = stalled;
+    census.stalled_high = high;
+    census.stalled_by_job = by_job;
+
+    watch.clear();
+    watch.extend(workers.iter().map(|(entity, ant)| (entity, ant.pos)));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -971,8 +1037,15 @@ fn shoot_colony(
     // From the world rather than from the counters above. A colony with no queen is the end of
     // the farm and has to be legible as that, not as a report that stopped changing.
     info!(
-        "    live: {} queens, {} brood ({} held)",
-        live.queens, live.brood, live.held,
+        "    live: {} queens, {} brood ({} held) | went nowhere in {STALL_WINDOW}s: {} = {} nurses, {} diggers, {} surface ({} above the cap)",
+        live.queens,
+        live.brood,
+        live.held,
+        live.stalled,
+        live.stalled_by_job[0],
+        live.stalled_by_job[1],
+        live.stalled_by_job[2],
+        live.stalled_high,
     );
     info!(
         "    dug {} | dropped out {} / while-buried {} | inside {} | failed {} | now: {} diggers, {} buried, {} falling, {} panicking",
