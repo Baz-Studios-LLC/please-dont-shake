@@ -450,6 +450,31 @@ pub fn excavated_volume(grid: &SandGrid) -> usize {
 /// colony digs out is either still in the mound, back in the hole, or in a mandible, and
 /// only the first is progress. Mound plus excavated should track the dig count; when it
 /// doesn't, spoil is coming back in and the difference is how much.
+/// The spoil heap's shape: how tall the tallest column stands above the original fill line, and
+/// how many columns carry any spoil at all.
+///
+/// Volume alone cannot tell a cone from a spire, and the spire is the failure `MOUND_HEADROOM`
+/// exists to prevent. Tall over few columns is a tower; tall over many is a heap, which is what
+/// a real farm looks like. Reported so that raising the cap is a measurement rather than a hope.
+pub fn mound_profile(grid: &SandGrid) -> (usize, usize) {
+    let mut tallest = 0;
+    let mut wide = 0;
+    for x in 0..GRID_W {
+        let mut top = None;
+        for y in (INITIAL_SURFACE..GRID_H).rev() {
+            if grid.get(x, y).mat == Substance::Sand {
+                top = Some(y);
+                break;
+            }
+        }
+        if let Some(top) = top {
+            wide += 1;
+            tallest = tallest.max(top + 1 - INITIAL_SURFACE);
+        }
+    }
+    (tallest, wide)
+}
+
 pub fn mound_volume(grid: &SandGrid) -> usize {
     let mut n = 0;
     for y in INITIAL_SURFACE..GRID_H {
@@ -1117,6 +1142,8 @@ fn shoot_colony(
     );
     // From the world rather than from the counters above. A colony with no queen is the end of
     // the farm and has to be legible as that, not as a report that stopped changing.
+    let (tallest, wide) = mound_profile(grid);
+    info!("    heap: {tallest} cells tall over {wide} columns");
     info!(
         "    live: {} queens, {} brood ({} held) | went nowhere in {STALL_WINDOW}s: {} = {} nurses, {} diggers, {} surface ({} above the cap) | STUCK for {}s+: {}",
         live.queens,
