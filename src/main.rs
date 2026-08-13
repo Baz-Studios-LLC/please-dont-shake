@@ -45,7 +45,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::common_conditions::on_real_timer;
 
-use audio::setup_music;
+use audio::setup_audio;
 
 use title::GameState;
 
@@ -150,7 +150,7 @@ fn main() {
                 setup_tank,
                 // After the tank, whose camera the overlay hangs off.
                 hand::setup_hand,
-                setup_music,
+                setup_audio,
             )
                 .chain(),
         )
@@ -226,12 +226,16 @@ fn main() {
                 sync_ant_transforms,
                 brood::sync_brood_transforms,
                 remesh_dirty_chunks,
+                // The rumble follows the tank's own speed, so it has to read the spring after
+                // everything that moves it.
+                audio::update_shake_rumble,
             )
                 .chain(),
         )
         .add_observer(title::on_menu_activate)
         .add_observer(pause::on_pause_activate)
         .add_observer(settings::on_control_activate)
+        .add_observer(audio::on_tap)
         // Settings are read before the first frame and written on every change. They are
         // applied by *watching* the resource rather than by being pushed from the click, so
         // a value restored from disk lands by exactly the same road as one just cycled.

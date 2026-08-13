@@ -12,9 +12,9 @@
 use crate::grid::*;
 use crate::hand::Touch;
 use crate::pheromones::{Ph, Pheromones};
-use crate::sand::{GrainSpawn, GrainSpawnQueue};
 use crate::radial::WEDGES;
 use crate::radial::{PlacementQueue, RadialMenu, Stock, commit_selection};
+use crate::sand::{GrainSpawn, GrainSpawnQueue};
 use crate::tank::{CAM_DIST, TankCamera, TankRoot, TankSpring};
 use crate::title::GameState;
 use bevy::prelude::*;
@@ -47,7 +47,7 @@ const SHAKE_ALARM_RATE: f32 = 2.4;
 /// per-frame amount would make the same gesture roughly twice as destructive at 120fps
 /// as at 60. That's not a subtle difference: it turned a moderate shake into a
 /// near-total collapse when first run against a release build.
-const SHAKE_DEADZONE: f32 = 2.0;
+pub const SHAKE_DEADZONE: f32 = 2.0;
 const SHAKE_TO_AGITATION: f32 = 0.132;
 const SHAKE_AGITATION_MAX_RATE: f32 = 3.6;
 const TILT_FROM_DRAG: f32 = 2.2;
@@ -162,7 +162,17 @@ pub fn track_touch(
     touch.pressing = held && !touch.grabbing;
 }
 
+use bevy::ecs::system::SystemParam;
+
+#[derive(SystemParam)]
+pub struct RadialParams<'w> {
+    pub menu: ResMut<'w, RadialMenu>,
+    pub stock: ResMut<'w, Stock>,
+    pub placements: ResMut<'w, PlacementQueue>,
+}
+
 pub fn pointer_input(
+    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -173,9 +183,7 @@ pub fn pointer_input(
     mut spring: ResMut<TankSpring>,
     mut grid: ResMut<SandGrid>,
     mut ph: ResMut<Pheromones>,
-    mut menu: ResMut<RadialMenu>,
-    mut stock: ResMut<Stock>,
-    mut placements: ResMut<PlacementQueue>,
+    mut radial: RadialParams,
     theme: Res<Theme>,
     mut grains: ResMut<GrainSpawnQueue>,
     settings: Res<crate::settings::Settings>,
@@ -220,18 +228,20 @@ pub fn pointer_input(
     if mouse.pressed(MouseButton::Left) {
         state.held += dt;
 
-        if menu.open {
+        if radial.menu.open {
             // Ordo owns the geometry, so picking and drawing can never disagree.
-            menu.selected = Radial::new(WEDGES.len())
-                .pick(cursor - menu.origin, theme.metric(Metric::RadialDeadZone));
+            radial.menu.selected = Radial::new(WEDGES.len()).pick(
+                cursor - radial.menu.origin,
+                theme.metric(Metric::RadialDeadZone),
+            );
         } else if state.drag_px < TAP_SLOP_PX
             && state.held >= HOLD_TO_OPEN
             && let Some(cell) = state.press_cell
         {
-            menu.open = true;
-            menu.origin = state.press_cursor;
-            menu.cell = cell;
-            menu.selected = None;
+            radial.menu.open = true;
+            radial.menu.origin = state.press_cursor;
+            radial.menu.cell = cell;
+            radial.menu.selected = None;
         } else if let Some(last) = state.last_cursor {
             let d_px = cursor - last;
             state.drag_px += d_px.length();
@@ -245,19 +255,26 @@ pub fn pointer_input(
             spring.vel = d_world / dt;
             spring.tilt_vel -= d_world.x * TILT_FROM_DRAG;
 
-            apply_shake_agitation(&mut grid, &mut ph, spring.vel.length(), dt, settings.shake_scale());
+            apply_shake_agitation(
+                &mut grid,
+                &mut ph,
+                spring.vel.length(),
+                dt,
+                settings.shake_scale(),
+            );
         }
         state.last_cursor = Some(cursor);
     }
 
     if mouse.just_released(MouseButton::Left) {
-        if menu.open {
-            commit_selection(&menu, &mut stock, &mut placements);
-            menu.open = false;
-            menu.selected = None;
+        if radial.menu.open {
+            commit_selection(&radial.menu, &mut radial.stock, &mut radial.placements);
+            radial.menu.open = false;
+            radial.menu.selected = None;
         } else if state.drag_px < TAP_SLOP_PX && state.held < HOLD_TO_OPEN {
             if let Some(cell) = state.press_cell {
                 tap(&mut grid, &mut ph, &mut spring, cell);
+                commands.trigger(crate::audio::TapEvent);
             }
         }
         state.last_cursor = None;
@@ -284,7 +301,10 @@ pub fn apply_shake_agitation(
         grid.agitate_all(rate * dt);
         // The shake lands on the colony's nervous system, not just its architecture.
         // Alarm floods every cell at once and then calms chemically over a minute or so.
-        ph.deposit_everywhere(Ph::Alarm, (rate / SHAKE_AGITATION_MAX_RATE) * SHAKE_ALARM_RATE * dt);
+        ph.deposit_everywhere(
+            Ph::Alarm,
+            (rate / SHAKE_AGITATION_MAX_RATE) * SHAKE_ALARM_RATE * dt,
+        );
     }
 }
 
@@ -325,8 +345,7 @@ fn pour(grains: &mut GrainSpawnQueue, cell: Vec2) {
         // a pour rather than a column of identical drops.
         let seed = (x as u32).wrapping_mul(31).wrapping_add(i);
         let jitter = hash01(seed, 3, 0x9E1B_C0DE) - 0.5;
-        let sx = (x as f32 + jitter * POUR_SPREAD)
-            .clamp(0.0, GRID_W as f32 - 1.0) as usize;
+        let sx = (x as f32 + jitter * POUR_SPREAD).clamp(0.0, GRID_W as f32 - 1.0) as usize;
 
         grains.0.push(GrainSpawn {
             x: sx,

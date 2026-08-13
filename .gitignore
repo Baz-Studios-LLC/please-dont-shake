@@ -10,3 +10,4 @@ scratch_*.py
 
 # Source WAVs stay local; the game ships the OGG.
 assets/music/*.wav
+assets/sfx/*.wav

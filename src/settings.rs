@@ -33,6 +33,8 @@ pub struct Settings {
     pub fullscreen: bool,
     /// Music level, 0 to 4. Zero is off.
     pub music: u8,
+    /// Sound effects level, 0 to 4. Zero is off.
+    pub sfx: u8,
     /// How hard a given hand movement shakes the tank, as an index into [`SHAKE_STEPS`].
     pub shake: u8,
     /// The hand's skin, as an index into [`SKIN_TONES`].
@@ -50,13 +52,34 @@ impl Default for Settings {
         // is time the game genuinely has, and real time without a catch-up is the truthful
         // version: everything you come back to actually happened while the tank was there. The
         // setting stays for people who close the app and would rather not lose the week.
-        Self { fullscreen: false, music: 3, shake: 1, skin: 1, away: false }
+        Self {
+            fullscreen: false,
+            music: 3,
+            sfx: 3,
+            shake: 1,
+            skin: 1,
+            away: false,
+        }
     }
 }
 
 /// Music levels, and the names shown for them.
-const MUSIC_STEPS: [(f32, &str); 5] =
-    [(0.0, "Off"), (0.22, "Quiet"), (0.45, "Low"), (0.65, "Normal"), (0.9, "Loud")];
+const MUSIC_STEPS: [(f32, &str); 5] = [
+    (0.0, "Off"),
+    (0.22, "Quiet"),
+    (0.45, "Low"),
+    (0.65, "Normal"),
+    (0.9, "Loud"),
+];
+
+/// Sound effect levels, and the names shown for them.
+const SFX_STEPS: [(f32, &str); 5] = [
+    (0.0, "Off"),
+    (0.25, "Quiet"),
+    (0.50, "Low"),
+    (0.75, "Normal"),
+    (1.0, "Loud"),
+];
 
 /// Shake sensitivity: a multiplier on what the input path does with hand speed, and the name
 /// for it. Not a difficulty setting — it's a mouse-feel setting, and the middle one is what
@@ -96,6 +119,14 @@ impl Settings {
 
     fn music_name(&self) -> &'static str {
         MUSIC_STEPS[(self.music as usize).min(MUSIC_STEPS.len() - 1)].1
+    }
+
+    pub fn sfx_volume(&self) -> f32 {
+        SFX_STEPS[(self.sfx as usize).min(SFX_STEPS.len() - 1)].0
+    }
+
+    fn sfx_name(&self) -> &'static str {
+        SFX_STEPS[(self.sfx as usize).min(SFX_STEPS.len() - 1)].1
     }
 
     /// What the shake verb multiplies its agitation by.
@@ -139,6 +170,7 @@ pub struct SettingsUi;
 pub enum Control {
     Fullscreen,
     Music,
+    Sfx,
     Shake,
     Skin,
     Away,
@@ -208,21 +240,37 @@ const TABS: [&str; 3] = ["Video", "Audio", "Gameplay"];
 ///
 /// A table rather than three hand-built panes. The window's shape stops being something to
 /// maintain and becomes something to read, and adding a setting is one line here.
-const ROWS: [(usize, Control, &str, &str); 5] = [
+const ROWS: [(usize, Control, &str, &str); 6] = [
     (
         0,
         Control::Fullscreen,
         "Fullscreen",
         "Fills the screen. The farm keeps its shape either way.",
     ),
-    (1, Control::Music, "Music", "The piano. Off is a setting too."),
+    (
+        1,
+        Control::Music,
+        "Music",
+        "The piano. Off is a setting too.",
+    ),
+    (
+        1,
+        Control::Sfx,
+        "Sound Effects",
+        "Taps, vibrations, and interactions.",
+    ),
     (
         2,
         Control::Shake,
         "Shake",
         "How hard your hand moves the tank.",
     ),
-    (2, Control::Skin, "Hand", "Your hand. It is the only part of you in the room."),
+    (
+        2,
+        Control::Skin,
+        "Hand",
+        "Your hand. It is the only part of you in the room.",
+    ),
     (
         2,
         Control::Away,
@@ -262,7 +310,12 @@ fn build(commands: &mut Commands, settings: &Settings) {
     // bring their own `Node` and two in one bundle is a hard panic — which this module has
     // now walked into three times: the backdrop's `Layer`, a button's `Node`, and this.
     let frame = commands
-        .spawn((SettingsFrame, card(), ChildOf(root), children![heading("Settings")]))
+        .spawn((
+            SettingsFrame,
+            card(),
+            ChildOf(root),
+            children![heading("Settings")],
+        ))
         .id();
     commands.spawn((rule(), SettingsDivider, ChildOf(frame)));
 
@@ -327,7 +380,9 @@ fn setting_row(
     commands
         .entity(parts.down)
         .insert(Nudge { control, up: false });
-    commands.entity(parts.up).insert(Nudge { control, up: true });
+    commands
+        .entity(parts.up)
+        .insert(Nudge { control, up: true });
 
     commands.spawn((dim(hint), ChildOf(group)));
 }
@@ -336,6 +391,7 @@ fn reading_for(control: Control, settings: &Settings) -> String {
     match control {
         Control::Fullscreen => if settings.fullscreen { "On" } else { "Off" }.to_string(),
         Control::Music => settings.music_name().to_string(),
+        Control::Sfx => settings.sfx_name().to_string(),
         Control::Shake => settings.shake_name().to_string(),
         Control::Skin => settings.skin_name().to_string(),
         Control::Away => if settings.away { "On" } else { "Off" }.to_string(),
@@ -349,7 +405,11 @@ fn reading_for(control: Control, settings: &Settings) -> String {
 /// sometimes goes up, which is a small lie about what the control does.
 fn step(value: u8, up: bool, len: usize) -> u8 {
     let last = (len - 1) as u8;
-    if up { value.saturating_add(1).min(last) } else { value.saturating_sub(1) }
+    if up {
+        value.saturating_add(1).min(last)
+    } else {
+        value.saturating_sub(1)
+    }
 }
 
 /// A nudge either way, or Done.
@@ -373,6 +433,7 @@ pub fn on_control_activate(
         Control::Fullscreen => settings.fullscreen = !settings.fullscreen,
         Control::Away => settings.away = !settings.away,
         Control::Music => settings.music = step(settings.music, *up, MUSIC_STEPS.len()),
+        Control::Sfx => settings.sfx = step(settings.sfx, *up, SFX_STEPS.len()),
         Control::Shake => settings.shake = step(settings.shake, *up, SHAKE_STEPS.len()),
         Control::Skin => settings.skin = step(settings.skin, *up, SKIN_TONES.len()),
     }
@@ -523,7 +584,11 @@ mod tests {
     /// either one missing is a panic on a value the player can reach by holding an arrow.
     #[test]
     fn stepping_stops_at_both_ends() {
-        assert_eq!(step(0, false, 5), 0, "stepping down from the first should stay");
+        assert_eq!(
+            step(0, false, 5),
+            0,
+            "stepping down from the first should stay"
+        );
         assert_eq!(step(4, true, 5), 4, "stepping up from the last should stay");
         assert_eq!(step(2, true, 5), 3);
         assert_eq!(step(2, false, 5), 1);
@@ -549,9 +614,19 @@ mod tests {
     /// end of a table. `serde(default)` covers missing fields; this covers wrong ones.
     #[test]
     fn a_nonsense_value_is_clamped_rather_than_fatal() {
-        let settings =
-            Settings { fullscreen: false, music: 200, shake: 200, skin: 200, away: true };
-        assert_eq!(settings.music_volume(), MUSIC_STEPS[MUSIC_STEPS.len() - 1].0);
+        let settings = Settings {
+            fullscreen: false,
+            music: 200,
+            sfx: 200,
+            shake: 200,
+            skin: 200,
+            away: true,
+        };
+        assert_eq!(
+            settings.music_volume(),
+            MUSIC_STEPS[MUSIC_STEPS.len() - 1].0
+        );
+        assert_eq!(settings.sfx_volume(), SFX_STEPS[SFX_STEPS.len() - 1].0);
         assert_eq!(settings.shake_scale(), SHAKE_STEPS[SHAKE_STEPS.len() - 1].0);
         assert_eq!(settings.skin_name(), SKIN_TONES[SKIN_TONES.len() - 1].1);
     }
@@ -562,7 +637,11 @@ mod tests {
     #[test]
     fn the_defaults_are_what_the_game_was_tuned_at() {
         let settings = Settings::default();
-        assert_eq!(settings.shake_scale(), 1.0, "the default shake must not scale anything");
+        assert_eq!(
+            settings.shake_scale(),
+            1.0,
+            "the default shake must not scale anything"
+        );
         assert_eq!(settings.music_volume(), 0.65);
         assert!(!settings.fullscreen);
         assert_eq!(settings.skin_name(), "Fair");
@@ -579,7 +658,10 @@ mod tests {
         };
         let mut previous = f32::MAX;
         for index in 0..SKIN_TONES.len() as u8 {
-            let settings = Settings { skin: index, ..Default::default() };
+            let settings = Settings {
+                skin: index,
+                ..Default::default()
+            };
             let (skin, knuckle) = settings.skin();
             assert!(
                 luma(skin) < previous,

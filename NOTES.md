@@ -134,6 +134,15 @@ caught a leak nobody suspected, and it has now done it twice.
 
 ## Traps already paid for
 
+- **Do not run `cargo fmt` on this repo.** It is not rustfmt-clean and the disagreement is a
+  style one: the code writes compact struct literals like `Cell { mat: Substance::Sand, shade }`
+  and rustfmt explodes each onto five lines. A whole-repo format is a 350-line diff across
+  fourteen files that touches nothing anybody changed, and it buries whatever the commit was
+  actually about — it did exactly that to a two-file sound fix. A `rustfmt.toml` does not rescue
+  it either; `struct_lit_width` and `fn_call_width` were tried and all fourteen files still
+  differ. Format the file you are editing by hand, in the style around you.
+
+
 Things that cost real time and will look like new bugs if forgotten.
 
 - **`Single<T>` silently skips its system** when the query doesn't match exactly one
