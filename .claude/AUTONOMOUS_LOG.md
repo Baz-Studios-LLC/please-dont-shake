@@ -35,12 +35,34 @@ of the design.
 
 ## Baseline Evidence
 
-From `NOTES.md`, measured near one hundred ants:
+**The quoted baseline is not usable and has to be re-measured.** The numbers below came off
+capture runs at a colony day a *second*, and that speed was removed on 2026-08-12 because it is
+not faithful: biology ran 86,400x while ants dug and walked at real-time pace, so a digger took
+4.9 cells of walking per cell dug where a real one takes ~28,000. A colony that hollows out
+where it stands has different logistics from one that tunnels, and congestion is precisely a
+logistics measurement. Treat these as describing a farm that never existed:
 
 - 175 cells excavated
 - 180 cells fell back into the nest, about 45% of everything dug in that run
 - 83 drops occurred inside the nest
 - sand drift remained zero
+
+### The instrument problem, and the fixture built for it
+
+The 125-second capture cannot reach the regime this phase is about. At the fastest honest speed
+(a colony day an hour, the derived ceiling in `SPEEDS`) it digs **one cell** with eleven ants in
+the tank. Growing a colony to a hundred at that speed would take ~35 hours, since the population
+converges on laying rate x lifespan over many brood cycles.
+
+So `--congestion` was added: it tips in ant kits through the game's own stocking path until the
+tank holds `--ants`, then runs at 24x for `--minutes`, printing the full spoil ledger every
+minute. Nothing in it spawns an ant directly or touches the colony clock beyond the honest
+ceiling, so the fixture cannot disagree with what the radial menu does.
+
+Two limitations, recorded because a fixture that hides them is worse than none: the colony is
+**seeded rather than grown**, so it skips the demographic ramp; and the nest is therefore younger
+than the colony working it. What it measures faithfully is the question actually asked — of the
+grains this colony digs, where do they end up.
 
 The known mechanisms are `HAUL_PATIENCE` dropping a grain where a blocked ant
 stands and the spoil mound's inner slope rolling loose grains back toward the
@@ -52,6 +74,9 @@ code blindly.
 
 - Autonomous workflow initialised for the coupled ant-and-sand simulation
   experiment.
+- `--congestion` fixture: a long run at the honest 24x that reaches a hundred ants and prints
+  the spoil ledger. Built before any change, because the phase's acceptance criteria ask for
+  evidence near a hundred ants and no existing instrument could produce it.
 
 ## Validation
 

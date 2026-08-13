@@ -894,6 +894,137 @@ pub fn run_capture(
 /// Let the colony dig for a hundred seconds, then find out what a tap and a shake do to
 /// something the ants actually built. The digging stretch is long on purpose: coherent
 /// architecture is a slow, cumulative result, and short runs just show scratches.
+// ---------------------------------------------------------------------------
+// The congestion run
+// ---------------------------------------------------------------------------
+
+/// `--congestion` — a long run at an honest speed, for measuring spoil logistics near a
+/// hundred ants.
+///
+/// It exists because the two-minute capture cannot reach the regime the question is about. The
+/// speed table tops out at a colony day an hour, which is the fastest rate at which ants still
+/// walk far enough between bites to tunnel rather than hollow (see [`SPEEDS`]), and at that rate
+/// a 125-second run digs *one cell* with eleven ants in the tank. Every congestion figure this
+/// project has quoted — 45% of everything dug falling back in, 83 drops inside the nest — came
+/// off runs at a colony day a second, where biology ran 86,400× while ants dug at walking pace.
+/// Those numbers describe a farm that never existed.
+///
+/// So: tip in kits until the tank holds the target headcount, then run at 24× and watch the
+/// spoil ledger. Two honest limitations, stated because a fixture that hides them is worse than
+/// none. The colony is *seeded* rather than grown, so it skips the demographic ramp and starts
+/// on flat sand with a hundred ants that a real farm would have acquired over a month; and the
+/// nest they dig is therefore younger than the colony working it. What it measures faithfully is
+/// the thing asked about — of the grains this colony digs, where do they end up.
+pub fn congestion_run() -> bool {
+    std::env::args().any(|a| a == "--congestion")
+}
+
+/// How many ants to fill the tank with, and how long to run. Both flagged, because the useful
+/// length depends on what is being asked: a ratio needs grains, and at 24× a hundred ants dig
+/// about two cells a minute.
+fn flag_value(name: &str, fallback: f32) -> f32 {
+    std::env::args()
+        .skip_while(|a| a != name)
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(fallback)
+}
+
+/// Seconds between ledger lines.
+const CONGESTION_REPORT: f32 = 60.0;
+
+pub fn run_congestion(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut cap: ResMut<DevCapture>,
+    mut clock: ResMut<crate::ants::ColonyClock>,
+    mut speed: ResMut<ColonySpeed>,
+    mut placements: ResMut<crate::radial::PlacementQueue>,
+    pour: Res<crate::ants::KitPour>,
+    grid: Res<SandGrid>,
+    stats: Res<crate::ants::ColonyStats>,
+    brood: Res<crate::brood::BroodStats>,
+    everyone: Query<&crate::ants::Ant>,
+    grains: Query<(), With<crate::grains::Grain>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let target = flag_value("--ants", 100.0) as usize;
+    let minutes = flag_value("--minutes", 60.0);
+
+    let prev = cap.t;
+    cap.t += time.delta_secs();
+    let now = cap.t;
+    let crossed = |at: f32| prev < at && now >= at;
+
+    if prev == 0.0 {
+        // The fastest speed that still tunnels. Never faster: the point of this run is that its
+        // numbers are true, and the whole reason it has to be long is that honesty.
+        clock.days_per_second = SPEEDS[SPEEDS.len() - 1].0;
+        speed.0 = SPEEDS.len() - 1;
+        info!("congestion run: filling to {target} ants, then {minutes:.0} minutes at 24x");
+    }
+
+    let alive = everyone.iter().count();
+    let carried = everyone.iter().filter(|ant| ant.carrying.is_some()).count();
+
+    // Fill the tank through the game's own stocking path — a kit at a time, only once the last
+    // one has finished pouring. Nothing here spawns an ant directly, so the fixture cannot
+    // disagree with what the radial menu does, and the one-queen guard in `pour_kit` turns every
+    // kit after the first into eleven workers.
+    if alive < target && pour.remaining == 0 && cap.t > 1.0 {
+        let spread = (alive as f32 * 0.7) % 60.0 - 30.0;
+        let at = Vec2::new(
+            (GRID_W as f32 * 0.5 + spread).clamp(20.0, GRID_W as f32 - 20.0),
+            (INITIAL_SURFACE + 2) as f32,
+        );
+        placements.0.push((crate::radial::StockItem::AntKit, at));
+    }
+
+    // The ledger. Every grain this colony has dug is in exactly one of these places, which is
+    // what makes the line worth reading: `dug` is the denominator and the rest have to sum to it.
+    let report = |at: f32, baseline: usize| {
+        let in_flight = grains.iter().count();
+        let sand = grid.sand_count() + in_flight + carried;
+        let drift = sand as i64 - baseline as i64;
+        let excavated = excavated_volume(&grid);
+        let mound = mound_volume(&grid);
+        let (open, room) = open_and_room(&grid);
+        let (tallest, wide) = mound_profile(&grid);
+        let dug = stats.dug.max(1) as i64;
+        let pct = |n: u64| n as i64 * 100 / dug;
+        info!(
+            "{at:5.0}s | {alive} ants, {carried} hauling | dug {} = {} out ({}%), {} in ({}%), {} failed, {} while buried | excavated {excavated}, mound {mound} | heap {tallest}x{wide} | nest {open} open, {room} room | brood {} | drift {drift:+}",
+            stats.dug,
+            stats.dropped_outside,
+            pct(stats.dropped_outside),
+            stats.dropped_inside,
+            pct(stats.dropped_inside),
+            stats.drop_failed,
+            stats.dropped_while_buried,
+            brood.eggs + brood.larvae + brood.pupae,
+        );
+    };
+
+    // Baseline once the tank is full, so drift is measured against a settled farm rather than
+    // against one that is still having ants poured into it.
+    if cap.baseline_sand == 0 && alive >= target {
+        cap.baseline_sand = grid.sand_count() + grains.iter().count() + carried;
+        info!("tank full at {alive} ants; baseline {} sand", cap.baseline_sand);
+    }
+
+    let step = (now / CONGESTION_REPORT).floor() * CONGESTION_REPORT;
+    if step > 0.0 && crossed(step) {
+        report(now, cap.baseline_sand);
+    }
+
+    if crossed(minutes * 60.0) {
+        report(now, cap.baseline_sand);
+        info!("congestion run complete");
+        exit.write(AppExit::Success);
+    }
+    let _ = &mut commands;
+}
+
 const C_SHOTS: [(f32, &str); 4] = [
     (2.0, "01-founded"),
     (25.0, "02-digging-25s"),

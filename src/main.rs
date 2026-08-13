@@ -365,7 +365,11 @@ fn main() {
             app.add_systems(Startup, devcapture::setup_offscreen_target.after(setup_tank));
         }
 
-        if devcapture::panel_shot() {
+        if devcapture::congestion_run() {
+            // A long run at an honest speed, for the one regime the 125-second capture cannot
+            // reach — see `devcapture::run_congestion`. Offscreen like every other tank run.
+            app.add_systems(Update, devcapture::run_congestion);
+        } else if devcapture::panel_shot() {
             app.add_systems(Update, devcapture::run_panel_shot);
         } else if devcapture::settings_shot() {
             app.add_systems(Update, devcapture::run_settings_shot);
