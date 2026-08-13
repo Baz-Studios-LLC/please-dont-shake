@@ -241,6 +241,11 @@ executable** (`asset_root()` in main.rs looks there first). A binary shipped alo
 into a tank with no sand, no music and no theme. The macOS half mirrors Divus Factus's
 packaging script, including its ad-hoc `codesign` and its space-free bundle name.
 
+**Only the patch number moves.** v0.4.1, v0.4.2, v0.4.3, and on. Never the minor, whatever
+the change is — v0.4.0 carried the labour-rate rework and the whole sound system, and the next
+release after it is v0.4.1. Three places have to agree: `version` in `Cargo.toml`, the CHANGELOG
+heading, and the tag, since the tag is what the launcher reads.
+
 **Releases are Brett's call, never a tidy-up step.** A tag reaches every installed
 launcher, so tagging is publishing. Build, test and commit freely; stop at the tag and say
 it's ready. When he asks:
