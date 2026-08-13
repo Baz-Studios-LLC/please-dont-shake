@@ -3,6 +3,24 @@
 The top section of this file becomes the release notes, and the launcher shows it as
 "What's New" — so it's written for whoever is about to play, not for whoever wrote it.
 
+## v0.4.0
+
+The farm keeps a real ant farm's hours now, and you can hear it.
+
+- **Sound.** Tapping the glass sounds like tapping the glass — three variations, so a quick
+  double-tap never strikes the same note twice — and shaking the tank rumbles, louder the harder
+  you shake it. There's a Sound Effects setting beside the music one, and Off is a setting.
+- **The colony digs at a colony's pace.** A day already took a day; now the work does too. A nest
+  is the labour of weeks rather than an afternoon, so the tunnels you're looking at genuinely took
+  that long to make — and a shake costs days of patient repair instead of a few minutes. That is
+  the whole point of the sign on the tank. If the farm looks still, look again tomorrow.
+- **The queen digs herself in.** She cuts her own shaft, pushes the diggings out into a ring
+  around the mouth the way a real one does, settles at the bottom, and only starts laying once
+  she's properly underground — so the eggs are in a chamber rather than lying out on the sand
+  where the first shake scatters them.
+- **One queen per farm**, properly enforced. A second one used to stop the colony laying and
+  tending its brood, silently and permanently.
+
 ## v0.3.1
 
 The colony gets back to work, and the queen goes where she belongs.
