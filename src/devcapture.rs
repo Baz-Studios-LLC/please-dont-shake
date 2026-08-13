@@ -961,6 +961,11 @@ pub fn run_congestion(
         // numbers are true, and the whole reason it has to be long is that honesty.
         clock.days_per_second = SPEEDS[SPEEDS.len() - 1].0;
         speed.0 = SPEEDS.len() - 1;
+    }
+    // On a threshold rather than `prev == 0.0`, which fires on two frames because Bevy's first
+    // Update has a delta of zero — the same trap that put two queens in the panel run. Harmless
+    // for an idempotent assignment above; not harmless for a line that claims to announce a run.
+    if crossed(0.1) {
         info!("congestion run: filling to {target} ants, then {minutes:.0} minutes at 24x");
     }
 
@@ -1002,6 +1007,11 @@ pub fn run_congestion(
             stats.drop_failed,
             stats.dropped_while_buried,
             brood.eggs + brood.larvae + brood.pupae,
+        );
+        let d = stats.drops_by_clearance;
+        info!(
+            "        where the spoil lands, columns from the mouth: <7:{} | 7-9:{} | 10-14:{} | 15-24:{} | 25+:{}",
+            d[0], d[1], d[2], d[3], d[4],
         );
     };
 

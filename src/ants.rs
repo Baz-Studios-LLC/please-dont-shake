@@ -282,6 +282,17 @@ pub struct ColonyStats {
     pub at_the_glass: usize,
     pub drop_failed: u64,
     pub dropped_inside: u64,
+    /// Where outside drops land, bucketed by how many columns they are from the nest mouth:
+    /// `0-6, 7-9, 10-14, 15-24, 25+`.
+    ///
+    /// This is here to test one hypothesis. `is_dump_site` accepts any column at least
+    /// `MOUND_CLEARANCE` from the mouth, and a hauler walks *away* from the mouth to find one —
+    /// so it qualifies the instant it crosses that radius and drops there. If that is what
+    /// happens, every grain in the farm lands on the same ring, the ring grows into a ridge, and
+    /// the inner face of that ridge slopes back down toward the shaft at the angle of repose,
+    /// which is a machine for feeding spoil back into the hole it came out of. The histogram
+    /// says whether drops pile on one radius or spread across the apron.
+    pub drops_by_clearance: [u64; 5],
 }
 
 #[derive(Resource)]
@@ -747,6 +758,15 @@ pub fn update_ants(
             if carried_far_enough && nav.is_dump_site(ux, uy) {
                 if drop_spoil(&mut ant, &mut grid, ux, uy) {
                     stats.dropped_outside += 1;
+                    let clearance = nav.mouth_clearance(ux);
+                    let bucket = match clearance {
+                        0..=6 => 0,
+                        7..=9 => 1,
+                        10..=14 => 2,
+                        15..=24 => 3,
+                        _ => 4,
+                    };
+                    stats.drops_by_clearance[bucket] += 1;
                 } else {
                     stats.drop_failed += 1;
                 }
