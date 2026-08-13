@@ -7,7 +7,7 @@ the design and the locked decisions; this holds the state of play and the traps.
 
 | repo | what | state |
 |---|---|---|
-| `Baz-Studios-LLC/please-dont-shake` | this game | public, `main`, tag `v0.3.1` |
+| `Baz-Studios-LLC/please-dont-shake` | this game | public, `main`, tag `v0.4.0` |
 | `Baz-Studios-LLC/Ordo` | UI kit — owns the radial menu widget | pinned by rev in Cargo.toml |
 | `Baz-Studios-LLC/baz-studios-launcher` | distribution | catalog row + art added, v0.1.21 |
 
