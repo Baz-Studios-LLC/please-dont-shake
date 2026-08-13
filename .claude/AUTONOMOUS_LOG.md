@@ -80,7 +80,24 @@ code blindly.
 
 ## Validation
 
-- Not started for this goal.
+- Baseline run in progress: 100 ants, 60 minutes at 24x, from a *snapshot* of the release
+  binary rather than `target/release` directly.
+
+### Two harness lessons from setting the baseline up
+
+**Never compile while a timed run is in flight.** The congestion run is paced by real time, and
+`Time::<Virtual>` clamps how much time one frame may deliver, so a machine busy with a release
+build falls behind: the sim ticks fewer times per real second and the colony digs less per
+reported minute. The ledger would be measuring the compiler. Copy the binary out
+(`scratchpad/bin/`) and run *that*, so later builds cannot disturb it either — a background
+`cargo build` and a foreground `cargo check` also deadlock on the same target-dir lock, which
+silently held the first baseline attempt at zero progress for several minutes.
+
+**Digging has a long warm-up now.** A worker's initial `dig_cooldown` is a random fraction of
+`DIG_INTERVAL`, which de-synchronised first bites nicely when the interval was 0.45s and now
+spreads them over a full 30,000-second interval — twenty minutes of a 24x run. The first minute
+of any congestion run therefore reads `dug 0`, which is correct rather than broken. Discount the
+warm-up when reading a ledger, or compare only the final lines.
 
 ## Research
 
