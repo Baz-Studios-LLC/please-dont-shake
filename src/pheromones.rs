@@ -113,6 +113,27 @@ impl Pheromones {
         self.get(layer, x as usize, y as usize)
     }
 
+    /// Is this cell at least as marked as everything touching it?
+    ///
+    /// The test that makes work attract work actually work. A digger standing on sand bites what
+    /// it walks into, and it is *always* standing on sand — so with a downward bias it bit the
+    /// ground under its feet the instant its wait elapsed, wherever it happened to be. Measured
+    /// at 110 ants over 45 minutes: forty columns of shallow scrapes, no shaft, no entrance the
+    /// nav flood could even recognise, and two thirds of everything dug dropped back inside
+    /// because there was no outside to carry it to.
+    ///
+    /// Requiring a local maximum turns the gradient into somewhere to *go*. An ant with a
+    /// stronger mark beside it walks there instead of biting; an ant at the face is at the peak
+    /// and bites; and an ant on unmarked ground is trivially at a maximum, so a colony tipped
+    /// onto flat sand can still start a hole. Nothing is routed and no layout is prescribed —
+    /// it is the same gradient, read as a destination rather than as a mood.
+    pub fn at_local_max(&self, layer: Ph, x: usize, y: usize) -> bool {
+        let here = self.get(layer, x, y);
+        !NEIGHBOURS_8.iter().any(|(dx, dy)| {
+            self.at(layer, x as isize + dx, y as isize + dy) > here
+        })
+    }
+
     pub fn deposit(&mut self, layer: Ph, x: usize, y: usize, amount: f32) {
         let i = Self::base(layer) + y * GRID_W + x;
         self.fields[i] += amount;

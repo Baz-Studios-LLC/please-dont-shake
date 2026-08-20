@@ -145,6 +145,60 @@ the memory now outlasts the gap between bites and that the reach is unchanged, w
 the claim it makes. Whether it produces better nests is a long-run question. If a long run shows
 no improvement, revert it — it is one function and one call site.
 
+### The real baseline, at last: 110 ants, 45 minutes, honest speed
+
+| t | dug | dropped inside | excavated | nest | drift |
+|---|---|---|---|---|---|
+| 540s | 21 | 9% | 19 | 19 open, 0 room | +0 |
+| 1140s | 60 | 43% | 32 | 31 open, 2 room | +0 |
+| 1740s | 84 | 52% | 34 | 33 open, 3 room | +0 |
+| 2340s | 128 | 63% | 40 | 39 open, 4 room | +0 |
+| 2700s | 147 | **65%** | **44** | 43 open, 4 room | +0 |
+
+**The phase's problem is real and it is worse than the discarded figure claimed.** Two thirds of
+everything dug goes back into the nest, the fraction climbs monotonically, and excavation
+flatlines: between 1140s and 2700s the colony dug 87 more grains and the nest grew by twelve
+cells. Mass stays exact throughout, which is the invariant doing its job — nothing is lost, it is
+just being carried in circles.
+
+### The ring hypothesis is dead, and the histogram killed it
+
+Outside drops by distance from the mouth: `<7:0 | 7-9:7 | 10-14:5 | 15-24:7 | 25+:30`. They do
+*not* pile on the minimum acceptable radius, so there is no inward-sloping ridge feeding spoil
+back down the shaft. Good hypothesis, wrong.
+
+**Read that histogram carefully, though**: a column with no detected entrance returns
+`GRID_W` from `mouth_clearance`, which lands in the `25+` bucket. So thirty of those forty-nine
+drops are really "no entrance exists anywhere near me" rather than "far from the entrance". That
+is the actual finding, and it points somewhere else entirely.
+
+### What is really wrong: the bite happens before the walk
+
+The farm never sinks a shaft. Forty columns of one-to-four-cell scrapes, `heap 4x40`, no entrance
+the nav flood can even recognise — and with no entrance there is no *outside*, so haulers wander
+until `HAUL_PATIENCE` expires and put the grain down where they stand. The congestion is a
+symptom; the disease is that digging never concentrates.
+
+It never concentrates because a digger is always standing on sand, and `step` bites whatever it
+walks into. The moment its wait elapsed, with a downward bias in its heading, it bit the ground
+under its feet — wherever that happened to be. The `Dig` gradient had nothing to do with it. Work
+cannot attract work when the bite lands before the walk does.
+
+Under test now: `Pheromones::at_local_max`, requiring an ant to be at least as marked as
+everything touching it before it may bite. An ant with a stronger mark beside it walks there
+instead; an ant at the face is at the peak and bites; an ant on unmarked ground is trivially at a
+maximum, so a colony on flat sand can still start a hole. The same gradient, read as a
+destination rather than a mood — no routing, no prescribed layout.
+
+Also instrumented, so the next reading names its own mechanism: inside drops split into
+`sealed in` versus `out of patience`.
+
+### Still open from this cycle
+
+The stall count spiked to 85 (58 stuck, 52 of them diggers) partway through the 45-minute run
+before settling back to 39/29. The paralysis fix moved the steady state a long way but there is
+still a transient that wants explaining.
+
 ## Research
 
 - None yet.

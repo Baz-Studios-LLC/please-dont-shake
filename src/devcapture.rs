@@ -1008,6 +1008,10 @@ pub fn run_congestion(
             d[0], d[1], d[2], d[3], d[4],
         );
         info!(
+            "        inside drops by cause: {} sealed in, {} out of patience",
+            stats.dropped_sealed, stats.dropped_impatient,
+        );
+        info!(
             "        went nowhere in 4s: {} = {} nurses, {} diggers, {} surface | STUCK 12s+: {}",
             live.stalled,
             live.stalled_by_job[0],

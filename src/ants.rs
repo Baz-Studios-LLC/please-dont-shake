@@ -307,6 +307,10 @@ pub struct ColonyStats {
     /// which is a machine for feeding spoil back into the hole it came out of. The histogram
     /// says whether drops pile on one radius or spread across the apron.
     pub drops_by_clearance: [u64; 5],
+    /// Inside drops split by *why*, because the two have different fixes: an ant walled in with
+    /// no route out at all, versus one that simply ran out of patience looking for a dump site.
+    pub dropped_sealed: u64,
+    pub dropped_impatient: u64,
 }
 
 #[derive(Resource)]
@@ -799,6 +803,11 @@ pub fn update_ants(
                 // besides: real colonies shift sand around inside the nest constantly.
                 if drop_spoil(&mut ant, &mut grid, ux, uy) {
                     stats.dropped_inside += 1;
+                    if sealed_in {
+                        stats.dropped_sealed += 1;
+                    } else {
+                        stats.dropped_impatient += 1;
+                    }
                 }
             }
         }
@@ -850,7 +859,11 @@ pub fn update_ants(
             &ant, &ph, &nav, job, panicking, above_ground, hungry, ux, uy, tick,
         );
 
-        let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0;
+        // Bite at a peak, walk while there is somewhere more worked to get to. See
+        // `Pheromones::at_local_max` — this is the line that turns "work attracts work" from a
+        // mood into a destination.
+        let at_the_face = ph.at_local_max(Ph::Dig, ux, uy);
+        let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0 && at_the_face;
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
         step(&mut ant, &mut grid, &mut ph, &nav, &mut stats, speed * dt, may_dig);
     }
