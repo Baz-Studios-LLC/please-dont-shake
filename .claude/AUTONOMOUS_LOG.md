@@ -193,6 +193,38 @@ destination rather than a mood — no routing, no prescribed layout.
 Also instrumented, so the next reading names its own mechanism: inside drops split into
 `sealed in` versus `out of patience`.
 
+### Result: biting at the face halves the congestion
+
+Two 45-minute runs at 110 ants, same fixture, same speed.
+
+| | baseline | `at_local_max` |
+|---|---|---|
+| dug | 145 | 74 |
+| dropped inside | 66% | **31%** |
+| excavated | 44 | 46 |
+| excavated / dug | 30% | **62%** |
+| room cells | 4 | **9** |
+| drift | +0 | +0 |
+
+Half the biting for slightly more nest: what vanished is the wasted work. Efficiency doubled, the
+inside-drop fraction halved, and the count of cells with air on all four sides — the closest thing
+to a chamber this project can measure — went from four to nine.
+
+Worth stating: excavation is now gated on *reaching* a face, so the bite rate fell from 193 cells
+per colony-day to 99. The design's target is about 115, so the honest reading is that the baseline
+was digging at nearly double the intended rate and throwing two thirds of it back.
+
+### What is left, with its mechanism named
+
+`inside drops by cause: 2 sealed in, 46 out of patience`. Sealing is solved; patience is not. And
+the chain is probably locomotion rather than dump sites: a hauler that cannot move will always
+time out and drop where it stands, and 55 of 110 ants were stuck for 12s+ at the end of that run.
+Fix the stalling and this should follow.
+
+**Do not read the stall numbers as a regression yet.** Across the two runs they fluctuated
+between 29 and 58 stuck with no clear trend, which is exactly the noise this project's notes warn
+about — never conclude from a single run. A repeat is running.
+
 ### Still open from this cycle
 
 The stall count spiked to 85 (58 stuck, 52 of them diggers) partway through the 45-minute run
