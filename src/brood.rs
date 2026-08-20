@@ -430,6 +430,9 @@ pub fn age_out(
 /// stays in one place long enough for the colony to answer it by digging. A chamber is what that
 /// answer looks like.
 pub fn brood_crowds(time: Res<Time>, mut ph: ResMut<Pheromones>, brood: Query<&Brood>) {
+    if !crate::ants::CROWDING_BRAKE {
+        return;
+    }
     let dt = time.delta_secs();
     for item in &brood {
         let (x, y) = (

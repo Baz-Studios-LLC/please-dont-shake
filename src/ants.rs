@@ -126,6 +126,20 @@ const W_JITTER: f32 = 0.5;
 const W_QUEEN: f32 = 1.4;
 const W_HOMEWARD: f32 = 2.6;
 
+/// Whether the crowding brake is switched on — deposits, gate and all.
+///
+/// One bool, because a field nothing reads is indefensible on a game whose product law is that
+/// it must be cheap to leave running. Every ant and every brood item was laying `Ph::Crowd` down
+/// each tick and the diffusion was sweeping forty thousand cells fifteen times a second, for a
+/// value the shipped game never consulted — the gate that would have used it is parked pending a
+/// measurement no short run can make. With this `false` the layer never activates at all, so the
+/// diffusion skips it entirely.
+///
+/// Flip it and the whole mechanism arrives together: ants and brood deposit, and `wants_to_dig`
+/// demands `DIG_DEMAND` of it underground. That is the experiment, and it wants a run of hours.
+/// Deliberately not a setting — players do not tune stigmergy.
+pub(crate) const CROWDING_BRAKE: bool = false;
+
 /// Crowding laid down per second by one ant, and by one brood item.
 ///
 /// Brood counts for more than a worker and that is the point of the number: a pile of eggs is a
@@ -688,7 +702,9 @@ pub fn update_ants(
         // Every body is a demand for room. Laid down before anything is decided, so the field an
         // ant reads includes itself — a lone ant in a wide gallery is not crowded, and one of
         // twenty in a pocket is.
-        ph.deposit(Ph::Crowd, ux, uy, CROWD_PER_ANT * dt);
+        if CROWDING_BRAKE {
+            ph.deposit(Ph::Crowd, ux, uy, CROWD_PER_ANT * dt);
+        }
         if ant.pos.x < 1.5 || ant.pos.x > GRID_W as f32 - 1.5 {
             stats.at_the_glass += 1;
         }
@@ -858,13 +874,24 @@ pub fn update_ants(
 /// question and not mine to answer alone. See NOTES.md.
 fn wants_to_dig(
     job: Job,
-    _crowd: f32,
-    _above_ground: bool,
+    crowd: f32,
+    above_ground: bool,
     carrying: bool,
     panicking: bool,
     digs_downward: bool,
 ) -> bool {
-    !carrying && !panicking && digs_downward && job == Job::Digger
+    if carrying || panicking || !digs_downward || job != Job::Digger {
+        return false;
+    }
+    // The brake, when [`CROWDING_BRAKE`] switches it on: crowding gates the *interior* only.
+    // Above ground it cannot gate anything, because the air over the sand is one enormous
+    // connected volume — the field disperses into the sky and a worker outside reads 1 to 3
+    // however many of them there are. Gate the entrance on it and a colony with no nest can
+    // never start one; measured, the farm sat at a two-cell nest with 84 ants in it.
+    if CROWDING_BRAKE && !above_ground && crowd < DIG_DEMAND {
+        return false;
+    }
+    true
 }
 
 /// The queen goes down the shaft and stays there.
