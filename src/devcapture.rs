@@ -939,6 +939,7 @@ pub fn run_congestion(
     brood: Res<crate::brood::BroodStats>,
     everyone: Query<&crate::ants::Ant>,
     grains: Query<(), With<crate::grains::Grain>>,
+    live: Res<Census>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let target = flag_value("--ants", 100.0) as usize;
@@ -1005,6 +1006,14 @@ pub fn run_congestion(
         info!(
             "        where the spoil lands, columns from the mouth: <7:{} | 7-9:{} | 10-14:{} | 15-24:{} | 25+:{}",
             d[0], d[1], d[2], d[3], d[4],
+        );
+        info!(
+            "        went nowhere in 4s: {} = {} nurses, {} diggers, {} surface | STUCK 12s+: {}",
+            live.stalled,
+            live.stalled_by_job[0],
+            live.stalled_by_job[1],
+            live.stalled_by_job[2],
+            live.stuck,
         );
     };
 

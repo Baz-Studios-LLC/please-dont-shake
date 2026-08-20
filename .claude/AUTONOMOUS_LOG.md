@@ -99,6 +99,52 @@ spreads them over a full 30,000-second interval — twenty minutes of a 24x run.
 of any congestion run therefore reads `dug 0`, which is correct rather than broken. Discount the
 warm-up when reading a ledger, or compare only the final lines.
 
+## Findings this cycle
+
+### The colony was largely paralysed, and it was the labour change that did it
+
+Measured at 110 ants with the congestion fixture — and note that **stalling is a locomotion
+measurement, so it needs scale rather than colony-days**: a six-minute run at a hundred ants is
+an honest instrument for it even though the same run says almost nothing about excavation.
+
+| | before | after |
+|---|---|---|
+| stuck 12s+ at 300s | 92 of 110 | 27 |
+| of which diggers | 66 | 9 |
+| trend over the run | climbing | flat |
+| dug by 360s | 6 | 14 |
+| drift | +0 | +0 |
+
+`dig_cooldown` only decremented while an ant was *in a digging posture*, which reads as "time
+spent trying". With a bite every 0.45s that was invisible; with a bite every 30,000s it is a
+trap. A digger turns to face the sand, cannot walk because every step is into solid ground,
+cannot dig because the wait has not elapsed, and the wait only elapses while it keeps facing the
+sand — so it stands pressing its face into the floor for ten real minutes. The stuck count
+climbed at exactly the rate ants adopted the pose.
+
+Two changes, together: the wait is elapsed time since the last bite and runs whatever the ant is
+doing, and only an ant whose wait *has* elapsed adopts the downward face-seeking heading. The
+rest walk the nest. Wall-following falls out of the existing deflection ladder, so "wander"
+underground already means "patrol the galleries".
+
+### A wrong inference, recorded because the shape of the mistake matters
+
+The same run showed `heap 1x14, nest 14 open, 0 room` — fourteen one-cell surface scrapes and no
+shaft — and I read that as stigmergy being broken by the labour rate, on the arithmetic that the
+`Dig` field forgets in 100s while bites are 30,000s apart. That arithmetic is sound and the field
+now runs on the colony clock because of it (`dig_memory_scale`, with both diffusion and
+evaporation scaled so the reach survives).
+
+But the *evidence* did not support the conclusion. In eight minutes the whole colony made
+**fifteen bites**. Fourteen scrapes is simply what fifteen bites looks like; it says nothing
+about whether work attracts work. Seeing a shaft form needs hundreds of bites, which is an hour
+at 24x at the very least.
+
+So `dig_memory_scale` is **verified in mechanism and unverified in outcome**: a unit test asserts
+the memory now outlasts the gap between bites and that the reach is unchanged, which is exactly
+the claim it makes. Whether it produces better nests is a long-run question. If a long run shows
+no improvement, revert it — it is one function and one call site.
+
 ## Research
 
 - None yet.

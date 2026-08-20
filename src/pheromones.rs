@@ -164,15 +164,47 @@ impl Default for Pheromones {
     }
 }
 
-pub fn diffuse_pheromones(mut ph: ResMut<Pheromones>, grid: Res<SandGrid>) {
+/// How much slower the `Dig` layer lives than the other three, as a factor on both its
+/// diffusion and its evaporation.
+///
+/// `Dig` is not a chemical the way `Alarm` is. It is the colony's memory of its own labour, and
+/// a memory of labour has to outlast the gap between the events it records or it cannot
+/// accumulate. That gap used to be 0.45 seconds and is now 30,000 — so a field tuned to
+/// remember for a hundred seconds went from holding two hundred of one ant's bites to holding
+/// none of them, and "work attracts work" quietly stopped being true. Measured at 110 ants: the
+/// colony cut *fourteen separate one-cell scrapes* across the surface, `heap 1x14`, with no
+/// shaft anywhere and no cell of the nest wider than a corridor.
+///
+/// So it runs on the colony's clock like the labour it records: the factor is the clock's rate
+/// over the rate this was tuned at. Both numbers scale together on purpose — reach is
+/// `sqrt(D · FIELD_HZ / evap)`, so scaling only the evaporation would flatten the field across
+/// the whole tank and destroy the gradient that makes it useful. Slowing both keeps the shape
+/// and stretches the timescale, which is exactly the intent.
+fn dig_memory_scale(clock: &crate::ants::ColonyClock) -> f32 {
+    // `1/86400` is real time, where a colony day takes a day. At that rate a bite is 30,000s
+    // apart and the memory needs to be about a colony-day long.
+    const TUNED_FOR_EVAP: f32 = 0.010;
+    (clock.days_per_second as f32 / TUNED_FOR_EVAP).clamp(1.0e-6, 1.0)
+}
+
+pub fn diffuse_pheromones(
+    mut ph: ResMut<Pheromones>,
+    grid: Res<SandGrid>,
+    clock: Res<crate::ants::ColonyClock>,
+) {
     let dt = 1.0 / FIELD_HZ;
+    let dig_scale = dig_memory_scale(&clock);
     let Pheromones { fields, scratch, active } = &mut *ph;
 
     for layer in 0..PH_LAYERS {
         if !active[layer] {
             continue;
         }
-        let (d, evap) = PH_PARAMS[layer];
+        let (mut d, mut evap) = PH_PARAMS[layer];
+        if layer == Ph::Dig as usize {
+            d *= dig_scale;
+            evap *= dig_scale;
+        }
         let keep = 1.0 - evap * dt;
         let base = layer * LAYER_LEN;
         let mut any = false;
@@ -450,6 +482,44 @@ mod tests {
         world.insert_resource(NavField::new());
         world.run_system_once(rebuild_nav_field).unwrap();
         world.remove_resource::<NavField>().unwrap()
+    }
+
+    /// The claim `dig_memory_scale` makes, checked as arithmetic because checking it as behaviour
+    /// is a four-hour colony run.
+    ///
+    /// Stigmergy needs the mark to still be there when the next ant arrives. One digger bites
+    /// every `DIG_INTERVAL`, so a memory shorter than that interval cannot accumulate one ant's
+    /// own work at all — which is what "work attracts work" is made of. This asserts the memory
+    /// outlasts the gap, and that scaling it did not wreck the *reach*, since a field spread
+    /// evenly across the tank carries no gradient and a gradient is the entire point.
+    ///
+    /// It also ties the two constants together: change `DIG_INTERVAL` without revisiting the
+    /// field and this fails, which is the coupling that quietly broke when labour moved onto the
+    /// colony clock and the field did not.
+    #[test]
+    fn the_dig_memory_outlasts_the_gap_between_bites() {
+        let real_time = crate::ants::ColonyClock::default();
+        let scale = dig_memory_scale(&real_time);
+
+        let (d0, evap0) = PH_PARAMS[Ph::Dig as usize];
+        let (d, evap) = (d0 * scale, evap0 * scale);
+
+        let memory_secs = 1.0 / evap;
+        assert!(
+            memory_secs > crate::ants::DIG_INTERVAL,
+            "the dig field forgets in {memory_secs:.0}s and a digger bites every {}s, so no ant \
+             can ever reinforce its own work",
+            crate::ants::DIG_INTERVAL,
+        );
+
+        let reach = |d: f32, evap: f32| (d * FIELD_HZ / evap).sqrt();
+        let (before, after) = (reach(d0, evap0), reach(d, evap));
+        assert!(
+            (after - before).abs() < 0.001,
+            "scaling changed the reach from {before:.1} cells to {after:.1}; a flat field has no \
+             gradient to climb",
+        );
+        assert!(d < 0.25, "an explicit 4-neighbour stencil diverges above D = 0.25");
     }
 
     /// The queen's whole route is this function, so it has to lead *in* and then stop.

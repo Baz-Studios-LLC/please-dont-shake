@@ -368,7 +368,14 @@ fn main() {
         if devcapture::congestion_run() {
             // A long run at an honest speed, for the one regime the 125-second capture cannot
             // reach — see `devcapture::run_congestion`. Offscreen like every other tank run.
-            app.add_systems(Update, devcapture::run_congestion);
+            // The census too: stalling is a *locomotion* measurement, and locomotion is still
+            // real time, so it needs scale rather than colony-days. A five-minute congestion run
+            // at a hundred ants is an honest instrument for it even though the same run says
+            // almost nothing about excavation.
+            app.add_systems(
+                Update,
+                (devcapture::take_census, devcapture::run_congestion).chain(),
+            );
         } else if devcapture::panel_shot() {
             app.add_systems(Update, devcapture::run_panel_shot);
         } else if devcapture::settings_shot() {

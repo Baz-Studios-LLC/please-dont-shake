@@ -59,7 +59,7 @@ const DIGGER_UNTIL: f64 = 26.0;
 /// cells an hour, and the farm is a thing you notice over weeks. That is the trade Brett chose,
 /// and the reason it is the right one is the shake: a rebuild measured in days is a cost you watch
 /// being paid, which is what gives "please don't shake" its teeth.
-const DIG_INTERVAL: f32 = 30_000.0;
+pub(crate) const DIG_INTERVAL: f32 = 30_000.0;
 
 /// Seconds between the bites of an ant clawing out of a collapse, and *not* scaled by labour.
 ///
@@ -808,13 +808,31 @@ pub fn update_ants(
             panicking,
             digs_downward,
         );
-        if ready_to_dig {
+        // The wait between bites runs for any ant whose job digs, not only for one currently
+        // standing in a digging posture, and that distinction paralysed the colony.
+        //
+        // It used to decrement only while `ready_to_dig`, which reads as "time spent trying".
+        // With a bite every 0.45s that was invisible. With a bite every 30,000 seconds it is a
+        // trap: a digger turns to face the sand, cannot walk because every step is into solid
+        // ground, cannot dig because the cooldown has not elapsed — and the cooldown only
+        // elapses while it keeps facing the sand. So it stands there pressing its face into the
+        // floor for ten real minutes. Measured at 110 ants: 92 of them stuck for 12s or more,
+        // 66 of those diggers, and the count climbing exactly as fast as ants adopted the pose.
+        //
+        // It is elapsed time since the last bite, so it passes while the ant does something
+        // else. Which is also what real ants do — a colony's diggers are not queued at the face.
+        if job != Job::Surface && !panicking && ant.carrying.is_none() {
             // Labour runs on the colony's clock, not the wall's. See `DIG_INTERVAL`.
             ant.dig_cooldown -= dt * labour;
         }
 
-        ant.heading =
-            desired_heading(&ant, &ph, &nav, job, panicking, above_ground, ux, uy, tick);
+        // Hungry to dig, rather than merely allowed to. Only an ant whose wait has elapsed
+        // adopts the downward, face-seeking heading; the rest walk the nest. This is what keeps
+        // the two rates coherent — the posture now costs a bite, not a shift.
+        let hungry = ant.dig_cooldown <= 0.0;
+        ant.heading = desired_heading(
+            &ant, &ph, &nav, job, panicking, above_ground, hungry, ux, uy, tick,
+        );
 
         let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0;
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
@@ -991,6 +1009,7 @@ fn desired_heading(
     job: Job,
     panicking: bool,
     above_ground: bool,
+    hungry: bool,
     ux: usize,
     uy: usize,
     tick: u32,
@@ -1029,13 +1048,24 @@ fn desired_heading(
     }
 
     match job {
-        Job::Digger => {
+        Job::Digger if hungry => {
             // Work attracts work. This is the rule the nest's shape comes from.
             let dig = ph.gradient(Ph::Dig, ux, uy).normalize_or_zero();
             want += dig * W_DIG_GRADIENT;
             // Lasius drive downward while founding.
             want += Vec2::NEG_Y * W_DOWNWARD;
             want += jitter * W_JITTER;
+        }
+        Job::Digger => {
+            // Between bites, and that is nearly all of the time now: walk the nest instead of
+            // leaning on it. No downward bias, because pointing into sand it cannot bite yet is
+            // the whole of how a digger gets stuck. Persistence and jitter follow the tunnels on
+            // their own — the deflection ladder in `step` makes an ant hug a wall rather than
+            // bounce off it, so "wander" underground *is* "patrol the galleries".
+            want += jitter * (W_JITTER * 1.3);
+            if above_ground {
+                want += follow_terrain(ant, nav, ux) * 1.1;
+            }
         }
         Job::Nurse => {
             // Drift up the queen's signal, which is why the colony visibly gathers
