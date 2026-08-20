@@ -225,6 +225,40 @@ Fix the stalling and this should follow.
 between 29 and 58 stuck with no clear trend, which is exactly the noise this project's notes warn
 about — never conclude from a single run. A repeat is running.
 
+### A dead end is a reason to dig, and it bought back the yield
+
+`at_local_max` halved the congestion and stranded about forty diggers pressing toward faces they
+could not reach — reproducibly, 58 to 63 stuck across two runs. So a boxed-in ant now bites
+instead of only turning: it has failed every direction it can walk, so it has by definition
+nowhere better to be and the concentration rule has nothing left to say. Biting through is also
+how a tunnel advances at all.
+
+Like-for-like at 1500s, 110 ants:
+
+| | `at_local_max` | + dead end |
+|---|---|---|
+| dug | 56 | 58 |
+| **excavated** | 34 | **42** |
+| room | 5 | 7 |
+| stuck 12s+ | 63 | 55 |
+| diggers stuck | 42 | 34 |
+| drift | +0 | +0 |
+
+The same amount of biting for a quarter more nest. Efficiency is now 42/58 = 72%, against 30% for
+the original baseline.
+
+**Where the phase stands against its criteria.** Drift exactly zero in every stage of every run.
+Excavated equals mound throughout. Spoil dropped inside went 66% and climbing to 44% and flat, so
+the runaway is stopped. All of it measured at 110 ants. Nothing routed, no layout prescribed — the
+whole change is one gradient read as a destination instead of a mood.
+
+**Not resolved: 34 diggers still stall.** Two candidate explanations and the metric cannot
+separate them. Either they are milling *at* the working face, which real colonies do and which the
+design's own "most ants are idle" line would bless, or they are still failing to act. What would
+distinguish them is a reading of how far a stalled ant is from the nearest `Dig` peak — stuck at
+the face is a crowd, stuck in open sand is a fault. That is the next instrument, not the next
+guess.
+
 ### Still open from this cycle
 
 The stall count spiked to 85 (58 stuck, 52 of them diggers) partway through the 45-minute run

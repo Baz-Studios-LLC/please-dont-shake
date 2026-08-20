@@ -865,7 +865,10 @@ pub fn update_ants(
         let at_the_face = ph.at_local_max(Ph::Dig, ux, uy);
         let may_dig = ready_to_dig && ant.dig_cooldown <= 0.0 && at_the_face;
         let speed = WALK_SPEED + if panicking { ALARM_SPEED_BONUS * alarm } else { 0.0 };
-        step(&mut ant, &mut grid, &mut ph, &nav, &mut stats, speed * dt, may_dig);
+        // `hungry` as well as `may_dig`: the first says the wait has elapsed, the second that
+        // this is the place. A dead end makes the second moot — see `step`.
+        let wants_to = ready_to_dig && hungry;
+        step(&mut ant, &mut grid, &mut ph, &nav, &mut stats, speed * dt, may_dig, wants_to);
     }
 }
 
@@ -1180,6 +1183,7 @@ fn step(
     stats: &mut ColonyStats,
     distance: f32,
     may_dig: bool,
+    hungry: bool,
 ) {
     // A single tick's walk is a fraction of a cell, so look a whole cell ahead when
     // deciding whether there's a face to bite. Testing the sub-cell step position means
@@ -1188,23 +1192,30 @@ fn step(
     let probe = ant.pos + ant.heading * DIG_REACH;
     let target = ant.pos + ant.heading * distance;
 
-    if may_dig {
+    // Biting, wherever the decision to bite came from. Two places now reach it: an ant at the
+    // face, and an ant that has run out of ways to walk — see the dead end below.
+    let mut bite = |ant: &mut Ant, grid: &mut SandGrid, ph: &mut Pheromones, stats: &mut ColonyStats| -> bool {
         let (tx, ty) = cell_of(probe);
         // Never undercut the tank floor, or sand drains out of the world.
-        if SandGrid::in_bounds(tx, ty)
-            && ty > 0
-            && grid.get(tx as usize, ty as usize).mat == Substance::Sand
+        if !SandGrid::in_bounds(tx, ty)
+            || ty <= 0
+            || grid.get(tx as usize, ty as usize).mat != Substance::Sand
         {
-            let cell = grid.take(tx as usize, ty as usize);
-            ant.carrying = Some(cell.shade);
-            ant.haul_time = 0.0;
-            ant.dug_at = ant.pos;
-            ant.dig_cooldown = DIG_INTERVAL;
-            stats.dug += 1;
-            // Work attracts work: this is the deposit the whole nest shape grows from.
-            ph.deposit(Ph::Dig, tx as usize, ty as usize, DIG_DEPOSIT);
-            return;
+            return false;
         }
+        let cell = grid.take(tx as usize, ty as usize);
+        ant.carrying = Some(cell.shade);
+        ant.haul_time = 0.0;
+        ant.dug_at = ant.pos;
+        ant.dig_cooldown = DIG_INTERVAL;
+        stats.dug += 1;
+        // Work attracts work: this is the deposit the whole nest shape grows from.
+        ph.deposit(Ph::Dig, tx as usize, ty as usize, DIG_DEPOSIT);
+        true
+    };
+
+    if may_dig && bite(ant, grid, ph, stats) {
+        return;
     }
 
     let from_y = ant.pos.y;
@@ -1234,6 +1245,21 @@ fn step(
     //
     // From the tick, the turn is different every frame, so a boxed-in ant sweeps for a way
     // out instead of orbiting.
+    // A dead end is a reason to dig, not only a reason to turn.
+    //
+    // `may_dig` requires standing at a peak of the `Dig` field, which is what stopped diggers
+    // biting the ground wherever they happened to be and halved the spoil going back into the
+    // nest. It also stranded them: a hungry digger walking toward a face it cannot reach presses
+    // at the wall and gets nowhere. Measured across two runs, reproducibly — 58 to 63 of 110 ants
+    // stuck for 12s or more, about forty of them diggers, against 29 before.
+    //
+    // An ant that has just failed every direction it can walk has, by definition, nowhere better
+    // to be, so the concentration rule has nothing left to say. Biting through is what a real one
+    // does and it is how a tunnel advances at all: you walk into the wall, then you go through it.
+    if hungry && bite(ant, grid, ph, stats) {
+        return;
+    }
+
     stats.walled_in += 1;
     let sweep = hash01(ant.pos.x.abs() as u32, ant.pos.y.abs() as u32, grid.tick)
         * std::f32::consts::TAU;
