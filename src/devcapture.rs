@@ -1012,12 +1012,13 @@ pub fn run_congestion(
             stats.dropped_sealed, stats.dropped_impatient,
         );
         info!(
-            "        went nowhere in 4s: {} = {} nurses, {} diggers, {} surface | STUCK 12s+: {}",
+            "        went nowhere in 4s: {} = {} nurses, {} diggers, {} surface | STUCK 12s+: {} | of the stalled, {} are on worked ground",
             live.stalled,
             live.stalled_by_job[0],
             live.stalled_by_job[1],
             live.stalled_by_job[2],
             live.stuck,
+            live.stalled_at_work,
         );
     };
 
@@ -1286,6 +1287,15 @@ pub struct Census {
     /// A nurse that has reached the brood is *supposed* to stay on it, and counting her as a
     /// fault would have me chasing the colony working correctly.
     pub stalled_by_job: [usize; 3],
+    /// Of the stalled, how many are standing where work has actually happened.
+    ///
+    /// The reading that separates a crowd from a fault. A stalled ant on a marked cell is at the
+    /// working face, which real colonies genuinely do — DESIGN.md asks for a large inactive
+    /// reserve and warns that a busy-looking colony reads as a factory. A stalled ant on
+    /// unmarked ground is not busy; it is failing, and that is worth chasing. The number the
+    /// stall metric could not give on its own.
+    stalled_at_work: usize,
+
     /// Workers that have gone nowhere for [`STUCK_WINDOWS`] samples running.
     ///
     /// This is the one that answers "are any ants actually stuck", and it exists because a single
@@ -1309,6 +1319,7 @@ const STALL_DISTANCE: f32 = 1.5;
 pub fn take_census(
     mut census: ResMut<Census>,
     time: Res<Time>,
+    ph: Res<Pheromones>,
     mut watch: Local<std::collections::HashMap<Entity, (Vec2, u8)>>,
     mut since: Local<f32>,
     ants: Query<&crate::ants::Ant>,
@@ -1317,8 +1328,13 @@ pub fn take_census(
     pile: Query<&crate::brood::Brood>,
     grains: Query<(), With<crate::grains::Grain>>,
 ) {
-    let (stalled, stalled_high, stalled_by_job, stuck) =
-        (census.stalled, census.stalled_high, census.stalled_by_job, census.stuck);
+    let (stalled, stalled_high, stalled_by_job, stuck, stalled_at_work) = (
+        census.stalled,
+        census.stalled_high,
+        census.stalled_by_job,
+        census.stuck,
+        census.stalled_at_work,
+    );
     *census = Census {
         ants: ants.iter().count(),
         carrying: ants.iter().filter(|ant| ant.carrying.is_some()).count(),
@@ -1332,6 +1348,7 @@ pub fn take_census(
         stalled_high,
         stalled_by_job,
         stuck,
+        stalled_at_work,
     };
 
     *since += time.delta_secs();
@@ -1345,6 +1362,7 @@ pub fn take_census(
     let mut high = 0;
     let mut by_job = [0usize; 3];
     let mut stuck = 0;
+    let mut at_work = 0;
     let mut next = std::collections::HashMap::with_capacity(watch.len());
     for (entity, ant) in &workers {
         // An ant nobody has seen before starts its streak at zero, which is right: it has not
@@ -1363,6 +1381,14 @@ pub fn take_census(
                 crate::ants::Job::Digger => 1,
                 crate::ants::Job::Surface => 2,
             }] += 1;
+
+            let (cx, cy) = (
+                (ant.pos.x.max(0.0) as usize).min(GRID_W - 1),
+                (ant.pos.y.max(0.0) as usize).min(GRID_H - 1),
+            );
+            if ph.get(Ph::Dig, cx, cy) > 0.001 {
+                at_work += 1;
+            }
         }
         if streak >= STUCK_WINDOWS {
             stuck += 1;
@@ -1373,6 +1399,7 @@ pub fn take_census(
     census.stalled_high = high;
     census.stalled_by_job = by_job;
     census.stuck = stuck;
+    census.stalled_at_work = at_work;
     *watch = next;
 }
 

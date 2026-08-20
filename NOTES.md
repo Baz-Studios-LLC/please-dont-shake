@@ -32,48 +32,49 @@ about a pile.
 **M2 (the colony) works.** Ants dig from flat sand, haul spoil, and mass stays exact across
 all three places a grain can hide — grid, particle, mandibles.
 
-The hauling rate **is** a problem, and this file has been wrong about it three times. Kept in
-order, because the sequence is the lesson. First, with the mound counted as well as the hole, on
-a run holding one queen throughout (2026-08-11) — this is where 16% comes from, and it was taken
-before the pacing fix, on a colony that had stopped working:
+The hauling rate **was** the problem, and it is measured and largely fixed. Every congestion
+figure this file quoted before 2026-08-20 came off runs at a colony day a *second* — biology at
+86,400x with ants digging and walking at real pace — and described a farm that never existed. The
+real numbers, from `--congestion` at 110 ants at the honest 24x:
 
-| stage | dug | excavated | mound | returned | sand |
-|---|---|---|---|---|---|
-| 25s | 36 | 35 | 23 | −11 | drift +0 |
-| 60s | 117 | 98 | 98 | 19 (16%) | drift +0 |
-| 100s | 117 | 98 | 98 | 19 (16%) | drift +0 |
+| | baseline | fixed |
+|---|---|---|
+| dropped inside the nest | 66%, climbing | 32%, flat |
+| excavated / dug | 30% | **72%** |
+| dropped while sealed in | some | **0** |
+| drift | +0 | +0 |
 
-`excavated == mound` is the signature of a healthy dig: what came out of the ground is sitting
-in the heap. Earlier notes quoted 67%, then 9%, and both were read off runs where the harness
-had tipped in a *second* ant kit — see the two-queens section. Every colony number in this file
-before 2026-08-11 is suspect for that reason.
+Three faults, in the order they were found, all of them consequences of labour moving onto the
+colony clock without the rules around it following:
 
-**And 16% was still wrong, because the loss scales with the colony.** Brett reported spoil
-falling back into the hole and burying ants; measured over one run:
+**The colony was paralysed.** `dig_cooldown` only decremented while an ant was already in a
+digging posture — "time spent trying". At 0.45s a bite that is invisible; at 30,000s it is a trap.
+A digger faces the sand, cannot walk because every step is into solid ground, cannot dig because
+the wait has not elapsed, and the wait only elapses while it keeps facing the sand. 92 of 110 ants
+stuck, climbing. The wait is elapsed time now and runs whatever the ant is doing, and only an ant
+whose wait *has* elapsed adopts the downward heading.
 
-| | ants | dug | excavated | fell back in | dropped *inside* the nest |
-|---|---|---|---|---|---|
-| 25s | 19 | 13 | 13 | 0 (0%) | 0 |
-| 60s | 72 | 181 | 105 | 41 (22%) | 26 |
-| 100s | 101 | 396 | 175 | 180 (45%) | 83 |
+**The bite landed before the walk.** A digger is always standing on sand and `step` bites what it
+walks into, so the instant its wait elapsed it bit the ground under its feet and the `Dig` gradient
+never entered the decision. Forty columns of shallow scrapes, no shaft, no entrance the nav flood
+could recognise — and with no entrance there is no *outside*, so haulers timed out and dropped
+where they stood. `Pheromones::at_local_max` requires an ant to be at least as marked as everything
+touching it before biting: walk toward a stronger mark, bite at the peak, and unmarked ground is
+trivially a maximum so a colony on flat sand can still start a hole.
 
-At a hundred ants nearly half of everything dug goes back, and a quarter of all drops happen
-inside the nest. It is congestion, which is why it was invisible on the small colonies every
-earlier number was taken from: **never quote a hauling figure without the headcount beside it.**
+**A dead end is a reason to dig.** That concentration rule then stranded ~40 diggers pressing at
+faces they could not reach. An ant that has failed every direction it can walk has nowhere better
+to be, so a boxed-in ant bites instead of only turning — which is also how a tunnel advances.
+Excavation rose 24% for the same biting.
 
-Two mechanisms, about half each. `HAUL_PATIENCE` drops a grain where the ant stands after 14s of
-failing to find a dump site — that backstop is what puts spoil in tunnels and on nestmates, and a
-buried ant emits alarm, and a panicking ant refuses to dig, so a bad drop costs more than a
-grain. The rest is spoil rolling home: drops are loose by design so they find their own angle,
-but the heap rings the mouth and the inside face of that ring slopes into the shaft.
+**How to read the stall numbers.** `of the stalled, N are on worked ground` is the line that
+matters. At 110 ants: 65 stalled, 38 of them on worked ground and 21 of the rest nurses on the
+queen — a crowd at the face and a huddle round the queen, which is what a colony looks like.
+Chasing this number to zero is explicitly wrong; DESIGN.md wants a large inactive reserve.
 
-`is_dump_site` is a fixed-size target — open ground, own surface, 7 columns clear of the mouth —
-being competed for by a colony that grew fivefold. Widening it or extending patience moves the
-symptom. The cause is that digging is unconditional: an ant digs because it walked into a face,
-so spoil is produced at a rate set by how many diggers exist rather than by whether the nest
-needs to be bigger. That same rule is why the colony would relocate the whole tank in a couple of
-hours of real time, and why the nest is one shaft with no chambers in it. One rule, three
-symptoms — see "Not yet done".
+**Still unmeasured: nest architecture.** `room` (cells with air on all four sides) went 4 to 7,
+which is the right direction, but 45 minutes buys ~75 bites and galleries need hundreds. That is a
+run of hours, and nothing in this repo has done one yet.
 
 **Always read excavated and mound together, and never conclude anything from a single run** —
 the harness drives on real frame times, so variance is large.
@@ -105,7 +106,22 @@ cargo run --release -- --capture --splash-shot --out /tmp/shots  # three frames 
 cargo run --release -- --capture --wheel-shot --out /tmp/shots    # the radial menu, unlit and lit
 cargo run --release -- --capture --hand-shot --out /tmp/shots     # the hand's three poses
 cargo run --release -- --capture --settings-shot --out /tmp/shots # the settings window, tab by tab
+
+# Spoil logistics and locomotion near a hundred ants, at the honest 24x. The only instrument
+# that reaches that regime: kits are tipped in through the game's own stocking path until the
+# tank is full, then it prints the whole spoil ledger every minute.
+cargo run --release -- --capture --congestion --ants 100 --minutes 25 --out /tmp/cong
 ```
+
+**Copy the binary out before a timed run**, and do not compile while one is in flight. These runs
+are paced by real time and `Time::<Virtual>` clamps how much one frame may deliver, so a machine
+busy with a release build falls behind and the ledger measures the compiler. A background build
+and a foreground `cargo check` also deadlock on the target-dir lock, which held one baseline at
+zero progress for several minutes. `cp target/release/please_dont_shake /tmp/pds-run` and run
+that.
+
+**A worker's first bite is up to a whole `DIG_INTERVAL` away**, so the first twenty minutes of a
+24x run legitimately read `dug 0`. Discount the warm-up or compare only the later lines.
 
 Anything that photographs UI has to keep the camera on the window *and* skip the offscreen
 target — see `ui_shot` in main.rs. The hand and settings runs also fake their input at the
