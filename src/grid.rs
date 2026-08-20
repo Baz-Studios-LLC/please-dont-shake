@@ -429,3 +429,76 @@ pub fn fill_strata(grid: &mut SandGrid, fill_h: usize) {
     // when the grid looks untouched, and a refilled tank must not look untouched.
     grid.epoch = grid.epoch.wrapping_add(1);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sand(shade: u8) -> Cell {
+        Cell { mat: Substance::Sand, shade }
+    }
+
+    /// The two primitives every grain of sand in the game passes through. Mass is the one
+    /// invariant this project promises absolutely, and it is enforced one cell at a time here.
+    #[test]
+    fn taking_and_moving_account_for_every_grain() {
+        let mut grid = SandGrid::new();
+        grid.set_raw(10, 10, sand(5));
+        let before = grid.sand_count();
+
+        let taken = grid.take(10, 10);
+        assert_eq!(taken.mat, Substance::Sand, "take did not hand back the grain");
+        assert_eq!(taken.shade, 5, "take lost the stratum the grain came from");
+        assert_eq!(grid.sand_count(), before - 1, "take removed more or less than one grain");
+        assert!(grid.is_air(10, 10), "take left something behind");
+
+        // Moving is the automaton's whole vocabulary: a grain leaves one cell and arrives in
+        // another, and the count cannot notice.
+        grid.set_raw(20, 20, sand(7));
+        let before = grid.sand_count();
+        grid.move_cell(20, 20, 20, 19);
+        assert_eq!(grid.sand_count(), before, "move_cell changed the amount of sand");
+        assert!(grid.is_air(20, 20), "move_cell left the grain behind as well");
+        assert_eq!(grid.get(20, 19).shade, 7, "move_cell lost the stratum");
+    }
+
+    /// Loose and packed are the two-state model the whole sand feel rests on, and `move_cell` is
+    /// where the transition happens: a grain that just moved is loose, and where it came from is
+    /// no longer holding anything up.
+    #[test]
+    fn a_moved_grain_arrives_loose() {
+        let mut grid = SandGrid::new();
+        grid.set_raw(30, 30, sand(1));
+        grid.pack(30, 30);
+        assert!(!grid.is_loose(30, 30));
+
+        grid.move_cell(30, 30, 30, 29);
+        assert!(grid.is_loose(30, 29), "a grain that just fell is not loose");
+    }
+
+    /// Agitation is *additive*, which is what makes a shake independent of frame rate: the same
+    /// impulse split across two frames has to land in the same place as one frame's worth.
+    ///
+    /// The acceptance criteria name this explicitly, and it is the kind of property that breaks
+    /// silently — a rule written as "set" rather than "add" looks identical on one machine and
+    /// halves the damage on a faster one.
+    #[test]
+    fn agitation_adds_so_a_shake_cannot_depend_on_frame_rate() {
+        let one_frame = {
+            let mut grid = SandGrid::new();
+            grid.agitate_all(0.2);
+            grid.agitation_at(40, 40)
+        };
+        let two_frames = {
+            let mut grid = SandGrid::new();
+            grid.agitate_all(0.1);
+            grid.agitate_all(0.1);
+            grid.agitation_at(40, 40)
+        };
+        assert!(
+            (one_frame - two_frames).abs() < 1e-6,
+            "one frame of 0.2 gave {one_frame} and two of 0.1 gave {two_frames}",
+        );
+        assert!(one_frame > 0.0, "the shake did not land at all");
+    }
+}

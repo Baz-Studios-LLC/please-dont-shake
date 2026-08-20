@@ -388,3 +388,82 @@ fn shade_for(x: usize, y: usize) -> u8 {
     let variant = (hash01(x as u32, y as u32, 0x5EED) * VARIANTS as f32) as usize;
     (stratum * VARIANTS + variant.min(VARIANTS - 1)) as u8
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tap is local, brief, and structurally harmless. All three are locked decisions, and the
+    /// first two are the ones a change to the radius or the falloff would break quietly.
+    #[test]
+    fn a_tap_is_local_and_moves_no_sand_itself() {
+        let mut grid = SandGrid::new();
+        crate::grid::fill_strata(&mut grid, INITIAL_SURFACE);
+        let mut ph = Pheromones::new();
+        let mut spring = TankSpring::default();
+
+        let before = grid.sand_count();
+        tap(&mut grid, &mut ph, &mut spring, Vec2::new(64.0, 80.0));
+
+        assert_eq!(
+            grid.sand_count(),
+            before,
+            "a tap moved sand by itself; it may only agitate, and let the automaton decide",
+        );
+        assert!(grid.agitation_at(64, 80) > 0.0, "the tap did not land where it was aimed");
+        assert_eq!(
+            grid.agitation_at(GRID_W - 4, 80),
+            0.0,
+            "a tap on one side of the glass agitated the far side",
+        );
+        assert!(ph.get(Ph::Alarm, 64, 80) > 0.0, "the tap raised no alarm at all");
+        assert_eq!(
+            ph.get(Ph::Alarm, GRID_W - 4, 80),
+            0.0,
+            "a local tap alarmed the whole colony",
+        );
+    }
+
+    /// The same shake has to do the same damage however the frames happen to fall.
+    ///
+    /// One of the acceptance criteria in as many words, and a property that fails silently: a
+    /// machine at 120fps would quietly shake twice as hard as one at 60. Splitting the interval
+    /// has to be indistinguishable from not splitting it.
+    #[test]
+    fn a_shake_does_not_depend_on_how_the_frames_fall() {
+        let sample = |steps: u32| {
+            let mut grid = SandGrid::new();
+            crate::grid::fill_strata(&mut grid, INITIAL_SURFACE);
+            let mut ph = Pheromones::new();
+            let dt = 0.1 / steps as f32;
+            for _ in 0..steps {
+                apply_shake_agitation(&mut grid, &mut ph, SHAKE_DEADZONE + 8.0, dt, 1.0);
+            }
+            (grid.agitation_at(64, 80), ph.get(Ph::Alarm, 64, 80))
+        };
+
+        let (agit_one, alarm_one) = sample(1);
+        let (agit_many, alarm_many) = sample(8);
+        assert!(
+            (agit_one - agit_many).abs() < 1e-5,
+            "one frame agitated {agit_one} and eight agitated {agit_many}",
+        );
+        assert!(
+            (alarm_one - alarm_many).abs() < 1e-5,
+            "one frame alarmed {alarm_one} and eight alarmed {alarm_many}",
+        );
+        assert!(agit_one > 0.0, "the shake did nothing");
+    }
+
+    /// Below the deadzone a hand is being held still, not shaking. Without this a resting hand
+    /// with a pixel of jitter in it would grind the farm down.
+    #[test]
+    fn a_still_hand_does_nothing() {
+        let mut grid = SandGrid::new();
+        crate::grid::fill_strata(&mut grid, INITIAL_SURFACE);
+        let mut ph = Pheromones::new();
+        apply_shake_agitation(&mut grid, &mut ph, SHAKE_DEADZONE - 0.01, 0.1, 1.0);
+        assert_eq!(grid.agitation_at(64, 80), 0.0, "a still hand shook the tank");
+        assert_eq!(ph.get(Ph::Alarm, 64, 80), 0.0, "a still hand alarmed the colony");
+    }
+}
