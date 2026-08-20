@@ -430,7 +430,9 @@ pub fn load_farm(
     // system uses, so one that was over a filled column still finds somewhere to sit
     // instead of overwriting what's there.
     for grain in &snapshot.grains {
-        crate::grains::settle(&mut grid, grain.x as isize, grain.y as isize, grain.shade);
+        if !crate::grains::settle(&mut grid, grain.x as isize, grain.y as isize, grain.shade) {
+            warn!("a saved in-flight grain had nowhere to land; the farm is one grain lighter");
+        }
     }
 
     for saved in &snapshot.ants {

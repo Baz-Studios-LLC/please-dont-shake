@@ -909,12 +909,30 @@ fn settle_the_queen(
     if founding && ant.dig_cooldown <= 0.0 {
         let below = cy - 1;
         if below > 0 && !grid.is_air(cx, below) {
-            let grain = grid.take(ux, below as usize);
             let side = if grid.tick % 2 == 0 { 1 } else { -1 };
             let out = (cx + side * QUEEN_SPOIL_OFFSET).clamp(1, GRID_W as isize - 2);
-            crate::grains::settle(grid, out, GRID_H as isize - 2, grain.shade);
-            ant.pos.y = below as f32 + 0.5;
-            ant.dig_cooldown = QUEEN_DIG_INTERVAL;
+            // Onto the ground beside the hole, not the roof of the tank.
+            //
+            // This passed `GRID_H - 2` and that was a bug worth remembering the shape of:
+            // `settle` searches *upward* from the row it is given, so the grain materialised in
+            // the top two rows and fell the whole height of the tank — and if those rows were
+            // ever full, which is exactly what happens to a farm whose spoil reaches the top,
+            // `settle` found nowhere and the grain ceased to exist. A mass leak, in the one
+            // invariant this game promises never to leak, reachable by playing well.
+            //
+            // One row above the terrain envelope is air by construction, since the envelope is
+            // the highest ground within seven columns either side.
+            let onto = nav.surface_at(out.clamp(0, GRID_W as isize - 1) as usize) as isize + 1;
+            let grain = grid.take(ux, below as usize);
+            if crate::grains::settle(grid, out, onto, grain.shade) {
+                ant.pos.y = below as f32 + 0.5;
+                ant.dig_cooldown = QUEEN_DIG_INTERVAL;
+            } else {
+                // Nowhere to put it, so she did not dig after all. Putting it straight back is
+                // the only version of this that keeps the mass exact.
+                grid.set_raw(ux, below as usize, grain);
+                warn!("the queen had nowhere to put her diggings");
+            }
             return;
         }
     }

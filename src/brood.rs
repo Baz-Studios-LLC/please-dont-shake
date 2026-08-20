@@ -413,7 +413,9 @@ pub fn age_out(
             // it searches upward for air, so it can never overwrite what is already there.
             if let Some(shade) = ant.carrying {
                 let (cx, cy) = crate::ants::cell_of(ant.pos);
-                crate::grains::settle(&mut grid, cx, cy, shade);
+                if !crate::grains::settle(&mut grid, cx, cy, shade) {
+                    warn!("a worker died holding a grain and the tank had nowhere to put it");
+                }
             }
             commands.entity(entity).despawn();
             stats.died += 1;

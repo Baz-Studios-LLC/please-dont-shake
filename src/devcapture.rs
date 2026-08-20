@@ -888,13 +888,6 @@ pub fn run_capture(
 }
 
 // ---------------------------------------------------------------------------
-// Colony timeline
-// ---------------------------------------------------------------------------
-
-/// Let the colony dig for a hundred seconds, then find out what a tap and a shake do to
-/// something the ants actually built. The digging stretch is long on purpose: coherent
-/// architecture is a slow, cumulative result, and short runs just show scratches.
-// ---------------------------------------------------------------------------
 // The congestion run
 // ---------------------------------------------------------------------------
 
@@ -1034,6 +1027,18 @@ pub fn run_congestion(
     }
     let _ = &mut commands;
 }
+
+// ---------------------------------------------------------------------------
+// Colony timeline
+// ---------------------------------------------------------------------------
+//
+// Let the colony dig for a hundred seconds, then find out what a tap and a shake do to
+// something the ants actually built. The digging stretch is long on purpose: coherent
+// architecture is a slow, cumulative result, and short runs just show scratches.
+//
+// At the honest 24x this run no longer reaches a colony worth photographing — see
+// `CAPTURE_DAYS_PER_SECOND`. What it still verifies is the sand and the locomotion: mass
+// conservation through a collapse, stalling, hauling, and the rebuild afterwards.
 
 const C_SHOTS: [(f32, &str); 4] = [
     (2.0, "01-founded"),
